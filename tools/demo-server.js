@@ -13,7 +13,16 @@ const { execFileSync } = require('child_process');
 const REPO = path.join(__dirname, '..');
 const CLI = path.join(REPO, 'dist', 'cli', 'index.js');
 const UI = path.join(__dirname, 'demo-ui.html');
-const PORT = 8787;
+const PORT = Number(process.env.PORT || 8787);
+// Public deployments MUST set DEMO_PASSCODE; without it anyone can spend the
+// OpenAI key. Locally (no passcode set) everything is open.
+const PASSCODE = process.env.DEMO_PASSCODE || null;
+
+function authorized(req) {
+  if (!PASSCODE) return true;
+  const url = new URL(req.url, 'http://x');
+  return req.headers['x-demo-key'] === PASSCODE || url.searchParams.get('key') === PASSCODE;
+}
 
 function kindFor(filename) {
   const ext = path.extname(filename).toLowerCase();
@@ -37,10 +46,14 @@ function json(res, code, obj) {
 }
 
 const server = http.createServer((req, res) => {
-  if (req.method === 'GET' && req.url === '/') {
+  if (req.method === 'GET' && (req.url === '/' || req.url.startsWith('/?'))) {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(fs.readFileSync(UI));
     return;
+  }
+
+  if (req.url.startsWith('/api/') && !authorized(req)) {
+    return json(res, 401, { error: 'passcode required (x-demo-key header)' });
   }
 
   if (req.method === 'GET' && req.url.startsWith('/api/workbook/')) {
@@ -145,4 +158,4 @@ const server = http.createServer((req, res) => {
   json(res, 404, { error: 'not found' });
 });
 
-server.listen(PORT, () => console.log(`Mosaic demo: http://localhost:${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`Mosaic demo: http://localhost:${PORT}${PASSCODE ? ' (passcode required)' : ''}`));

@@ -52,6 +52,7 @@
     </select>
   </div>
   <div><label>Location</label><input type="text" id="location" placeholder="City, ST"></div>
+  <div><label>Passcode (hosted demos only)</label><input type="text" id="passcode" placeholder="leave blank locally"></div>
 </div>
 
 <div id="drop">Drop deal documents here or click to browse<br><span style="font-size:.75rem">PDF, XLSX, CSV, MD, TXT, PNG/JPG (image-based docs get an OCR pass; DOCX pending)</span></div>
@@ -105,6 +106,10 @@
     });
   }
 
+  const pass = document.getElementById('passcode');
+  pass.value = localStorage.getItem('mosaicDemoKey') || '';
+  pass.addEventListener('change', () => localStorage.setItem('mosaicDemoKey', pass.value));
+
   go.addEventListener('click', async () => {
     go.disabled = true;
     const status = document.getElementById('status');
@@ -118,7 +123,7 @@
     };
     status.textContent = 'Running pipeline (extraction, screen, workbook' + (payload.narrative ? ', narrative' : '') + ')...';
     try {
-      const res = await fetch('/api/deal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const res = await fetch('/api/deal', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-demo-key': pass.value }, body: JSON.stringify(payload) });
       const j = await res.json();
       if (j.error) throw new Error(j.error);
       status.textContent = '';
@@ -136,9 +141,10 @@
       document.getElementById('fields').innerHTML = '<tr><th>Field</th><th>Value</th><th>Confidence</th></tr>' +
         j.extracted.map(f => `<tr><td>${f.field}</td><td>${String(f.value).substring(0, 60)}</td><td class="conf">${f.confidence.toFixed(2)}</td></tr>`).join('');
       document.getElementById('steps').innerHTML = j.steps.map(s => `<li class="${s.ok ? 'ok' : 'fail'}">${s.ok ? 'OK' : 'FAIL'} - ${s.step}${s.detail ? ' (' + s.detail + ')' : ''}</li>`).join('');
-      document.getElementById('wb').href = j.workbookUrl;
+      const key = pass.value ? '?key=' + encodeURIComponent(pass.value) : '';
+      document.getElementById('wb').href = j.workbookUrl + key;
       const nar = document.getElementById('nar');
-      if (j.narrativeUrl) { nar.style.display = 'inline-block'; nar.href = j.narrativeUrl; }
+      if (j.narrativeUrl) { nar.style.display = 'inline-block'; nar.href = j.narrativeUrl + key; }
       document.getElementById('result').style.display = 'block';
     } catch (e) {
       status.textContent = 'Failed: ' + e.message;
