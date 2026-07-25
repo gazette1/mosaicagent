@@ -67,7 +67,7 @@ program
       console.log(`✓ Created deal: ${deal.dealId}`);
       console.log(`  Name: ${deal.name}`);
       console.log(`  Type: ${deal.assetType}`);
-      if (deal.location) console.log(`  Location: ${deal.location}`);
+      if (deal.location) console.log(`  Location: ${deal.location.address || ''}`);
       console.log(`  Folder: deals/${deal.dealId}/`);
       console.log('');
       console.log('Next steps:');
@@ -359,12 +359,15 @@ program
       
       console.log('');
       console.log('Key Metrics:');
-      for (const [name, metric] of Object.entries(screenOutput.keyMetrics)) {
+      for (const [, metric] of Object.entries(screenOutput.keyMetrics)) {
         const val = metric.value.value;
         const conf = metric.value.confidence;
-        const formatted = name.toLowerCase().includes('cap') || name.toLowerCase().includes('dscr') || name.toLowerCase().includes('ltv')
-          ? typeof val === 'number' ? (name.toLowerCase().includes('dscr') ? val.toFixed(2) + 'x' : (val * 100).toFixed(2) + '%') : val
-          : typeof val === 'number' ? '$' + val.toLocaleString() : val;
+        const unit = metric.value.unit;
+        // Values are stored display-ready: unit '%' is already scaled to percent
+        const formatted = typeof val !== 'number' ? val
+          : unit === '%' ? val.toFixed(2) + '%'
+          : unit === 'x' ? val.toFixed(2) + 'x'
+          : '$' + Math.round(val).toLocaleString();
         console.log(`  ${metric.name}: ${formatted} (conf: ${conf.toFixed(2)})`);
       }
       
@@ -436,14 +439,14 @@ program
       console.log('');
       console.log('Projected Returns:');
       console.log(`  Equity Multiple: ${deepdiveOutput.returns.equityMultiple.value.toFixed(2)}x`);
-      console.log(`  Cash-on-Cash: ${(deepdiveOutput.returns.cashOnCash.value * 100).toFixed(1)}%`);
-      console.log(`  IRR (approx): ${(deepdiveOutput.returns.irr.value * 100).toFixed(1)}%`);
+      console.log(`  Cash-on-Cash: ${deepdiveOutput.returns.cashOnCash.value.toFixed(1)}%`);
+      console.log(`  IRR (approx): ${deepdiveOutput.returns.leveredIRR.value.toFixed(1)}%`);
       
       console.log('');
       console.log('Strategy Options:');
-      for (const strategy of deepdiveOutput.strategyOptions) {
-        console.log(`  ${strategy.rank}. ${strategy.name}: ${strategy.description}`);
-      }
+      deepdiveOutput.strategyOptions.forEach((strategy, i) => {
+        console.log(`  ${i + 1}. ${strategy.name}: ${strategy.description}`);
+      });
       
       console.log('');
       console.log('Key Risks:');
@@ -484,7 +487,7 @@ program
       console.log('─'.repeat(60));
       console.log(`  ID: ${deal.dealId}`);
       console.log(`  Asset Type: ${deal.assetType}`);
-      if (deal.location) console.log(`  Location: ${deal.location}`);
+      if (deal.location) console.log(`  Location: ${deal.location.address || ''}`);
       if (deal.askingPrice) console.log(`  Asking Price: $${deal.askingPrice.value.toLocaleString()}`);
       console.log(`  Created: ${deal.createdAt}`);
       console.log(`  Updated: ${deal.updatedAt}`);
@@ -525,7 +528,7 @@ program
       }
       if (deal.underwriting.deepdive) {
         console.log(`  Deep Dive: Complete`);
-        console.log(`    IRR: ${(deal.underwriting.deepdive.returns.irr.value * 100).toFixed(1)}%`);
+        console.log(`    IRR: ${deal.underwriting.deepdive.returns.leveredIRR.value.toFixed(1)}%`);
         console.log(`    Equity Multiple: ${deal.underwriting.deepdive.returns.equityMultiple.value.toFixed(2)}x`);
       } else {
         console.log('  Deep Dive: Not run');
@@ -568,7 +571,7 @@ function applyExtractedValues(
   if (extractedValues['address'] && !deal.location) {
     const address = extractedValues['address'];
     if (typeof address.value === 'string') {
-      deal.location = address.value;
+      deal.location = { address: address.value };
     }
   }
   

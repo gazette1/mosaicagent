@@ -3,7 +3,7 @@
  * Parses and normalizes rent roll data into canonical format
  */
 
-import { v4 as uuidv4 } from 'crypto';
+import { randomUUID as uuidv4 } from 'crypto';
 import { RentRoll, Tenant, TrackedNumber, tracked } from '../core/schemas';
 import { ParseResult, findColumn, parseNumber } from './parsers';
 

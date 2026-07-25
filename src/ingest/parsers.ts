@@ -50,6 +50,7 @@ export function parseCSVContent(content: string): ParseResult {
   const rows: ParsedRow[] = (result.data as Record<string, string>[]).map(row => {
     const parsed: ParsedRow = {};
     for (const key of Object.keys(row)) {
+      if (key === '__parsed_extra') continue; // PapaParse overflow cells for ragged rows
       const value = row[key];
       // Try to parse as number
       const num = parseNumber(value);
@@ -105,7 +106,12 @@ export function parseNumber(value: string | number | null | undefined): number |
   if (typeof value === 'number') {
     return isNaN(value) ? null : value;
   }
-  
+
+  // Guard against non-string values (e.g. PapaParse __parsed_extra arrays)
+  if (typeof value !== 'string') {
+    return null;
+  }
+
   // Remove currency symbols, commas, whitespace
   let cleaned = value.replace(/[$,\s]/g, '');
   

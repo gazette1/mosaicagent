@@ -267,7 +267,7 @@ function groupBy<T>(arr: T[], key: keyof T): Record<string, T[]> {
 }
 
 function generateSensitivityTable(
-  data: Array<{ rowValue: number; colValue: number; resultValue: number }>,
+  data: Array<{ rowValue?: number; colValue?: number; resultValue?: number }>,
   rowKey: string,
   colKey: string,
   valueKey: string,

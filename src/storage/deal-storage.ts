@@ -79,16 +79,19 @@ export function createDeal(
   fs.mkdirSync(path.join(dealPath, 'outputs'), { recursive: true });
   
   // Initialize deal object
+  const now = new Date().toISOString();
   const deal: Deal = {
     dealId,
     name,
     assetType,
-    location,
+    location: location ? { address: location } : undefined,
     sources: [],
-    extracted: {},
+    extracted: { notes: [] },
     assumptions: {},
     underwriting: {},
-    auditLog: []
+    auditLog: [],
+    createdAt: now,
+    updatedAt: now
   };
   
   // Add creation audit entry
@@ -330,19 +333,19 @@ export function writeModelCsv(
   
   let cumulative = 0;
   const rows = deepdive.cashflows.map(cf => {
-    cumulative += cf.cashFlow.value;
+    cumulative += cf.cashFlowAfterDebt.value;
     return [
       cf.year,
       cf.noi.value.toFixed(0),
       cf.debtService.value.toFixed(0),
-      cf.cashFlow.value.toFixed(0),
+      cf.cashFlowAfterDebt.value.toFixed(0),
       cumulative.toFixed(0)
     ];
   });
-  
+
   // Add exit year summary
   const exitYear = deepdive.cashflows.length;
-  const exitValue = deepdive.exitValue.grossValue.value;
+  const exitValue = deepdive.exitValue.value;
   const loanPayoff = deepdive.debtSizing.loanAmount.value;
   const netProceeds = exitValue - loanPayoff;
   
@@ -366,26 +369,27 @@ export function writeSensitivityCsv(
   baseDir?: string
 ): string {
   // Create DSCR sensitivity grid
-  const dscrSensitivities = deepdive.sensitivities.filter(s => s.metric === 'DSCR');
-  
+  // Cells store: rowValue = interest rate (%), colValue = NOI change (%), resultValue = DSCR
+  const dscrSensitivities = deepdive.sensitivities.filter(s => s.resultMetric === 'DSCR');
+
   if (dscrSensitivities.length === 0) {
     // No sensitivity data
     return writeCsvOutput(dealId, 'sensitivity.csv', ['No sensitivity data'], [], baseDir);
   }
-  
-  // Extract unique rate and NOI changes
-  const rateChanges = [...new Set(dscrSensitivities.map(s => s.rateChange))].sort((a, b) => a - b);
-  const noiChanges = [...new Set(dscrSensitivities.map(s => s.noiChange))].sort((a, b) => a - b);
-  
+
+  // Extract unique rate levels and NOI changes
+  const rateLevels = [...new Set(dscrSensitivities.map(s => s.rowValue))].sort((a, b) => a - b);
+  const noiChanges = [...new Set(dscrSensitivities.map(s => s.colValue))].sort((a, b) => a - b);
+
   // Build grid
-  const headers = ['DSCR Sensitivity', ...rateChanges.map(r => `Rate ${r >= 0 ? '+' : ''}${(r * 100).toFixed(0)}bps`)];
-  
+  const headers = ['DSCR Sensitivity', ...rateLevels.map(r => `Rate ${r.toFixed(2)}%`)];
+
   const rows: (string | number)[][] = [];
   for (const noi of noiChanges) {
-    const row: (string | number)[] = [`NOI ${noi >= 0 ? '+' : ''}${(noi * 100).toFixed(0)}%`];
-    for (const rate of rateChanges) {
-      const match = dscrSensitivities.find(s => s.rateChange === rate && s.noiChange === noi);
-      row.push(match ? match.value.toFixed(2) + 'x' : '-');
+    const row: (string | number)[] = [`NOI ${noi >= 0 ? '+' : ''}${noi.toFixed(0)}%`];
+    for (const rate of rateLevels) {
+      const match = dscrSensitivities.find(s => s.rowValue === rate && s.colValue === noi);
+      row.push(match ? match.resultValue.toFixed(2) + 'x' : '-');
     }
     rows.push(row);
   }
