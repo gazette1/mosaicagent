@@ -95,6 +95,40 @@ export function parseXLSX(filePath: string, sheetName?: string): ParseResult {
 }
 
 // ============================================================================
+// Parse ALL sheets of an XLSX workbook (sponsor models are multi-sheet)
+// ============================================================================
+
+export interface WorkbookParseResult {
+  sheetNames: string[];
+  sheets: Record<string, ParseResult>;
+  /** Full workbook rendered to text, for pattern extraction across sheets */
+  asText: string;
+}
+
+export function parseXLSXWorkbook(filePath: string): WorkbookParseResult {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const XLSX = require('xlsx');
+
+  const workbook = XLSX.readFile(filePath);
+  const sheets: Record<string, ParseResult> = {};
+  const textParts: string[] = [];
+
+  for (const name of workbook.SheetNames) {
+    const sheet = workbook.Sheets[name];
+    if (!sheet) continue;
+    const csv = XLSX.utils.sheet_to_csv(sheet);
+    sheets[name] = parseCSVContent(csv);
+    textParts.push(`=== SHEET: ${name} ===\n${csv}`);
+  }
+
+  return {
+    sheetNames: workbook.SheetNames,
+    sheets,
+    asText: textParts.join('\n\n'),
+  };
+}
+
+// ============================================================================
 // Number parsing with handling for currency, percentages, etc.
 // ============================================================================
 

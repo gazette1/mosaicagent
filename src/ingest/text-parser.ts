@@ -88,6 +88,35 @@ const EXTRACTION_PATTERNS: ExtractionPattern[] = [
     valueType: 'percent',
     confidence: 0.7,
   },
+  // Hotel: key count
+  {
+    field: 'keys',
+    patterns: [
+      /(\d{2,4})[\s-]*(?:key|room|guest\s*room)s?\b/i,
+      /(?:key|room)\s*count[\s:]*(\d{2,4})/i,
+    ],
+    valueType: 'number',
+    confidence: 0.8,
+  },
+  // Hotel: ADR
+  {
+    field: 'adr',
+    patterns: [
+      /(?:adr|average\s*daily\s*rate)[\s:]*\$?([\d,]+(?:\.\d+)?)/i,
+      /\$?([\d,]+(?:\.\d+)?)\s*adr/i,
+    ],
+    valueType: 'currency',
+    confidence: 0.75,
+  },
+  // Hotel: RevPAR
+  {
+    field: 'revpar',
+    patterns: [
+      /(?:revpar|rev\s*par)[\s:]*\$?([\d,]+(?:\.\d+)?)/i,
+    ],
+    valueType: 'currency',
+    confidence: 0.75,
+  },
   // Rent per SF
   {
     field: 'rentPerSF',
@@ -123,15 +152,18 @@ const EXTRACTION_PATTERNS: ExtractionPattern[] = [
 // Parse value by type
 // ============================================================================
 
-function parseValue(raw: string, valueType: string): number | string | null {
+function parseValue(raw: string, valueType: string, fullMatch?: string): number | string | null {
   const cleaned = raw.replace(/[,\s]/g, '');
-  
+  // Multiplier suffixes live in the surrounding text, not the captured number
+  const context = (fullMatch ?? raw).toLowerCase();
+
   switch (valueType) {
     case 'currency': {
-      // Handle millions shorthand
       let num = parseFloat(cleaned);
-      if (raw.toLowerCase().includes('mm') || raw.toLowerCase().includes('million')) {
+      if (/\d\s*(?:mm|million)/.test(context)) {
         num *= 1_000_000;
+      } else if (/\d\s*k\b/.test(context)) {
+        num *= 1_000;
       }
       return isNaN(num) ? null : num;
     }
@@ -162,18 +194,42 @@ export interface TextExtractionResult {
   rawText: string;
 }
 
+// Plausibility ranges per field. Values outside are pattern collisions
+// (years read as occupancy, spreads read as prices) and are discarded.
+// Deterministic QC: cheaper than any model and never hallucinates.
+const SANITY_RANGES: Record<string, [number, number]> = {
+  askingPrice: [250_000, 5_000_000_000],
+  noi: [25_000, 500_000_000],
+  capRate: [0.005, 0.25],
+  occupancy: [0.01, 1.0],
+  adr: [30, 2_500],
+  revpar: [5, 2_000],
+  keys: [10, 2_500],
+  totalUnits: [1, 10_000],
+  totalSF: [500, 50_000_000],
+  yearBuilt: [1850, 2035],
+  rentPerSF: [0.25, 500],
+};
+
+function passesSanity(field: string, value: number | string): boolean {
+  if (typeof value !== 'number') return true;
+  const range = SANITY_RANGES[field];
+  if (!range) return true;
+  return value >= range[0] && value <= range[1];
+}
+
 export function extractFromText(text: string, sourceId: string): TextExtractionResult {
   const notes: ExtractedNote[] = [];
   const extractedValues: Record<string, { value: number | string; confidence: number; rawText: string }> = {};
-  
+
   for (const pattern of EXTRACTION_PATTERNS) {
     for (const regex of pattern.patterns) {
       const match = text.match(regex);
       if (match && match[1]) {
         const rawText = match[0];
-        const value = parseValue(match[1], pattern.valueType);
-        
-        if (value !== null) {
+        const value = parseValue(match[1], pattern.valueType, match[0]);
+
+        if (value !== null && passesSanity(pattern.field, value)) {
           // Only add if we don't already have this field or if this match is better
           if (!extractedValues[pattern.field] || 
               pattern.confidence > extractedValues[pattern.field].confidence) {

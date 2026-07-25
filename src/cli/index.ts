@@ -23,10 +23,12 @@ import {
   getOutputsPath
 } from '../storage';
 import { AssetType, Source, ExtractedNote, tracked } from '../core/schemas';
-import { smartParse } from '../ingest/parsers';
+import { smartParse, parseXLSXWorkbook } from '../ingest/parsers';
 import { normalizeRentRoll } from '../ingest/rentroll-normalizer';
 import { normalizeT12, estimateNoiFromRentRoll } from '../ingest/t12-normalizer';
-import { parseBrokerEmail, parseOMText } from '../ingest/text-parser';
+import { parseBrokerEmail, parseOMText, extractFromText } from '../ingest/text-parser';
+import { extractFromPdf } from '../ingest/pdf-extractor';
+import { ASSET_TYPE_CRITERIA } from '../core/doctrine';
 import { screenDeal } from '../underwrite/screen';
 import { deepDiveDeal } from '../underwrite/deepdive';
 import { generateScreenReport } from '../report/screen-report';
@@ -47,10 +49,10 @@ program
   .command('new')
   .description('Create a new deal folder')
   .requiredOption('-n, --name <n>', 'Deal name')
-  .requiredOption('-t, --type <type>', 'Asset type (industrial, retail, multifamily, other)')
+  .requiredOption('-t, --type <type>', 'Asset type (industrial, retail, multifamily, hotel, other)')
   .option('-l, --location <location>', 'Property location')
   .action((options: { name: string; type: string; location?: string }) => {
-    const validTypes: AssetType[] = ['industrial', 'retail', 'multifamily', 'other'];
+    const validTypes: AssetType[] = ['industrial', 'retail', 'multifamily', 'hotel', 'other'];
     
     if (!validTypes.includes(options.type as AssetType)) {
       console.error(`Error: Invalid asset type "${options.type}". Must be one of: ${validTypes.join(', ')}`);
@@ -117,9 +119,9 @@ program
   .description('Ingest a source file into a deal')
   .requiredOption('-d, --deal <dealId>', 'Deal ID')
   .requiredOption('-f, --file <path>', 'Path to source file')
-  .requiredOption('-k, --kind <kind>', 'Source type (email, om_text, rentroll_csv, t12_csv)')
-  .action((options: { deal: string; file: string; kind: string }) => {
-    const validKinds: Source['kind'][] = ['email', 'om_text', 'rentroll_csv', 't12_csv', 'manual'];
+  .requiredOption('-k, --kind <kind>', 'Source type (email, om_text, rentroll_csv, t12_csv, pdf, xlsx_model)')
+  .action(async (options: { deal: string; file: string; kind: string }) => {
+    const validKinds: Source['kind'][] = ['email', 'om_text', 'rentroll_csv', 't12_csv', 'pdf', 'xlsx_model', 'manual'];
     
     if (!validKinds.includes(options.kind as Source['kind'])) {
       console.error(`Error: Invalid kind "${options.kind}". Must be one of: ${validKinds.join(', ')}`);
@@ -295,10 +297,52 @@ program
           break;
         }
         
+        case 'pdf': {
+          console.log('  Extracting PDF text...');
+          const extracted = await extractFromPdf(filePath, source.id);
+          console.log(`  ✓ ${extracted.pageCount} pages`);
+
+          if (!deal.extracted.notes) deal.extracted.notes = [];
+          deal.extracted.notes.push(...extracted.notes);
+          applyExtractedValues(deal, extracted.extractedValues, source.id);
+          applyHotelMetrics(deal, extracted.extractedValues, source.id);
+
+          const avgConfidence = extracted.notes.length > 0
+            ? extracted.notes.reduce((sum, n) => sum + n.confidence, 0) / extracted.notes.length
+            : 0.5;
+          auditDataExtracted(deal, source.id, 'pdf', extracted.notes.length, avgConfidence);
+
+          console.log(`  ✓ Extracted ${extracted.notes.length} data points`);
+          for (const note of extracted.notes) {
+            console.log(`    - ${note.field}: ${note.extractedValue} (confidence: ${note.confidence.toFixed(2)})`);
+          }
+          break;
+        }
+
+        case 'xlsx_model': {
+          console.log('  Parsing multi-sheet workbook...');
+          const wbParsed = parseXLSXWorkbook(filePath);
+          console.log(`  ✓ Sheets (${wbParsed.sheetNames.length}): ${wbParsed.sheetNames.join(', ')}`);
+
+          // Pattern extraction across the full workbook text
+          const extracted = extractFromText(wbParsed.asText, source.id);
+          if (!deal.extracted.notes) deal.extracted.notes = [];
+          deal.extracted.notes.push(...extracted.notes);
+          applyExtractedValues(deal, extracted.extractedValues, source.id);
+          applyHotelMetrics(deal, extracted.extractedValues, source.id);
+
+          auditDataExtracted(deal, source.id, 'xlsx_model', extracted.notes.length, 0.6);
+          console.log(`  ✓ Extracted ${extracted.notes.length} data points across sheets`);
+          for (const note of extracted.notes) {
+            console.log(`    - ${note.field}: ${note.extractedValue} (confidence: ${note.confidence.toFixed(2)})`);
+          }
+          break;
+        }
+
         default:
           console.log('  No parsing implemented for this kind');
       }
-      
+
       // Save deal
       saveDeal(deal);
       console.log(`✓ Deal saved`);
@@ -603,6 +647,71 @@ function applyExtractedValues(
       });
     }
   }
+}
+
+/**
+ * Populate hotel metrics from extracted values (hotel deals only).
+ * Hotels underwrite off keys x occupancy x ADR; if NOI is absent it is
+ * proxied through the hotel expense ratio and flagged as such.
+ */
+function applyHotelMetrics(
+  deal: ReturnType<typeof loadDeal>,
+  extractedValues: Record<string, { value: number | string; confidence: number; rawText: string }>,
+  sourceId: string
+): void {
+  if (deal.assetType !== 'hotel') return;
+
+  const num = (field: string): { value: number; confidence: number } | null => {
+    const e = extractedValues[field];
+    return e && typeof e.value === 'number' ? { value: e.value, confidence: e.confidence } : null;
+  };
+
+  const keys = num('keys') ?? num('totalUnits');
+  const adr = num('adr');
+  const occ = num('occupancy');
+  const revpar = num('revpar');
+
+  if (!keys && !adr && !occ && !revpar) return;
+
+  const hotel = deal.extracted.hotel ?? { sourceId };
+  const set = (k: 'keys' | 'occupancy' | 'adr' | 'revpar', v: { value: number; confidence: number } | null, unit: string) => {
+    if (v && !hotel[k]) hotel[k] = tracked(v.value, v.confidence, { sourceId, unit });
+  };
+  set('keys', keys, 'keys');
+  set('adr', adr, 'USD');
+  set('occupancy', occ, 'decimal');
+  set('revpar', revpar, 'USD');
+
+  // Derive RevPAR when missing
+  if (!hotel.revpar && hotel.adr && hotel.occupancy) {
+    hotel.revpar = tracked(hotel.adr.value * hotel.occupancy.value, Math.min(hotel.adr.confidence, hotel.occupancy.confidence), {
+      sourceId, unit: 'USD', formula: 'ADR x occupancy',
+    });
+  }
+
+  // Proxy NOI from keys x occ x ADR through the hotel expense ratio when
+  // no operating statement NOI exists
+  if (!deal.extracted.t12?.noi && hotel.keys && hotel.adr && hotel.occupancy) {
+    const roomsRev = hotel.keys.value * 365 * hotel.occupancy.value * hotel.adr.value;
+    const ratio = ASSET_TYPE_CRITERIA['hotel'].defaultExpenseRatio;
+    const noi = roomsRev * (1 - ratio);
+    const conf = Math.min(hotel.keys.confidence, hotel.adr.confidence, hotel.occupancy.confidence) - 0.2;
+    hotel.roomsRevenue = tracked(roomsRev, conf + 0.1, { sourceId, unit: 'USD/year', formula: 'keys x 365 x occ x ADR' });
+    hotel.noi = tracked(noi, Math.max(conf, 0.3), {
+      sourceId, unit: 'USD/year', isProxy: true,
+      proxyMethod: 'rooms_revenue_expense_ratio',
+      formula: `roomsRevenue x (1 - ${ratio})`,
+      rationale: 'Proxy NOI; request operating statements',
+    });
+    deal.extracted.t12 = {
+      sourceId,
+      revenue: [],
+      expenses: [],
+      noi: hotel.noi,
+    };
+  }
+
+  deal.extracted.hotel = hotel;
 }
 
 // Parse command line arguments

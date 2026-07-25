@@ -1,0 +1,9 @@
+{
+  "asOf": "2025-12-08",
+  "index": "SOFR",
+  "indexRate": 0.0530,
+  "bridgeSpreadBps": 400,
+  "bridgeSpreadRangeBps": [350, 450],
+  "permRate": 0.065,
+  "notes": "Bridge pricing per what bridge shops are quoting (Access Point, Peachtree, Driftwood, HALL: SOFR + 350-450 on transitional hospitality, Dec 2025 memo). indexRate must be refreshed before any package is routed. Confirm current quotes with Michael."
+}

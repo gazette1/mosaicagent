@@ -9,10 +9,10 @@ import { z } from 'zod';
 // Base Types
 // ============================================================================
 
-export const AssetTypeSchema = z.enum(['industrial', 'retail', 'multifamily', 'other']);
+export const AssetTypeSchema = z.enum(['industrial', 'retail', 'multifamily', 'hotel', 'other']);
 export type AssetType = z.infer<typeof AssetTypeSchema>;
 
-export const SourceKindSchema = z.enum(['email', 'om_text', 'rentroll_csv', 't12_csv', 'manual', 'computed']);
+export const SourceKindSchema = z.enum(['email', 'om_text', 'rentroll_csv', 't12_csv', 'pdf', 'xlsx_model', 'manual', 'computed']);
 export type SourceKind = z.infer<typeof SourceKindSchema>;
 
 export const VerdictSchema = z.enum(['KILL', 'CHASE', 'STRUCTURE', 'DELEGATE']);
@@ -122,6 +122,27 @@ export const T12Schema = z.object({
   expenseRatio: TrackedNumberSchema.optional(),
 });
 export type T12 = z.infer<typeof T12Schema>;
+
+// ============================================================================
+// Hotel Metrics (hospitality assets underwrite off keys x occupancy x ADR,
+// not rent rolls)
+// ============================================================================
+
+export const HotelMetricsSchema = z.object({
+  sourceId: z.string(),
+  periodLabel: z.string().optional(), // e.g. 'T12', 'Y3 stabilized pro forma'
+  keys: TrackedNumberSchema.optional(),
+  occupancy: TrackedNumberSchema.optional(), // decimal
+  adr: TrackedNumberSchema.optional(), // USD
+  revpar: TrackedNumberSchema.optional(), // USD; occupancy x ADR when computed
+  roomsRevenue: TrackedNumberSchema.optional(),
+  ancillaryRevenue: TrackedNumberSchema.optional(), // F&B, parking, resort fees
+  totalRevenue: TrackedNumberSchema.optional(),
+  operatingExpenses: TrackedNumberSchema.optional(),
+  noi: TrackedNumberSchema.optional(),
+  pipBudget: TrackedNumberSchema.optional(),
+});
+export type HotelMetrics = z.infer<typeof HotelMetricsSchema>;
 
 // ============================================================================
 // Extracted Notes (from emails, OMs)
@@ -321,6 +342,7 @@ export const DealSchema = z.object({
   extracted: z.object({
     rentRoll: RentRollSchema.optional(),
     t12: T12Schema.optional(),
+    hotel: HotelMetricsSchema.optional(),
     notes: z.array(ExtractedNoteSchema),
   }),
   assumptions: AssumptionsSchema,

@@ -161,7 +161,9 @@ export function adjustConfidenceBySource(baseConfidence: number, sourceKind: Sou
   const adjustments: Record<SourceKind, number> = {
     't12_csv': 0, // No adjustment - most reliable
     'rentroll_csv': -0.05,
+    'xlsx_model': -0.10, // Sponsor model: structured but sponsor-authored
     'om_text': -0.15,
+    'pdf': -0.15, // Marketing/appraisal PDFs: same trust tier as OM text
     'email': -0.25,
     'manual': -0.10,
     'computed': -0.05,

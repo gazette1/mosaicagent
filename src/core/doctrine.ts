@@ -4,6 +4,7 @@
  */
 
 import { AssetType } from './schemas';
+import { getBridgeRate, getMarketConfig } from './market-config';
 
 // ============================================================================
 // Wedge Assets (Day 1 Focus)
@@ -74,6 +75,24 @@ export const ASSET_TYPE_CRITERIA: Record<AssetType, {
     defaultCaps: { entry: 0.055, exit: 0.062 },
     defaultVacancy: 0.07,
     defaultExpenseRatio: 0.45,
+  },
+  hotel: {
+    description: 'Hospitality (keys x occupancy x ADR, not rent rolls)',
+    idealProfile: [
+      'Branded or brand-convertible (franchise support, key money potential)',
+      'Irreplaceable location (oceanfront, CBD, airport)',
+      'Below-market basis vs appraisal or replacement cost',
+      'Clear bridge-to-perm or condo-conversion exit',
+    ],
+    redFlags: [
+      'Unflagged independent with no conversion path',
+      'PIP scope unpriced or > 40% of basis',
+      'Single-season market with < 50% annual occupancy',
+      'Deferred maintenance on life-safety systems',
+    ],
+    defaultCaps: { entry: 0.085, exit: 0.0925 },
+    defaultVacancy: 0.30, // 1 - stabilized occupancy ~70%
+    defaultExpenseRatio: 0.62, // full-service departmental expense load
   },
   other: {
     description: 'Non-core asset type',
@@ -278,10 +297,12 @@ export const RISK_SCORE_DESCRIPTIONS: Record<number, { label: string; descriptio
 export const SOURCE_PRIORITY: Record<string, number> = {
   't12_csv': 1, // Primary financial statements
   'rentroll_csv': 2, // Rent roll
-  'om_text': 3, // Offering memorandum
-  'email': 4, // Broker email
-  'manual': 5, // Manual entry
-  'computed': 6, // Calculated value
+  'xlsx_model': 3, // Sponsor model workbook
+  'om_text': 4, // Offering memorandum
+  'pdf': 4, // PDF documents (OM/appraisal/memo tier)
+  'email': 5, // Broker email
+  'manual': 6, // Manual entry
+  'computed': 7, // Calculated value
 };
 
 export function getSourcePriority(kind: string): number {
@@ -310,11 +331,16 @@ export const EXECUTION_DRAG_FLAGS = [
 // ============================================================================
 
 export function getMarketRateProxy(): number {
-  // Current market rate assumption when no financing terms provided
-  // Note: This should be updated periodically or made configurable
-  return 0.075; // 7.5%
+  // Market-indexed: index + bridge spread from config/market.json.
+  // Never a hardcoded number; refresh the config before routing packages.
+  return getBridgeRate();
 }
 
 export function getStressedRate(): number {
   return getMarketRateProxy() + DEFAULT_STRESSES.interestRateStress;
+}
+
+export function describeMarketRate(): string {
+  const c = getMarketConfig();
+  return `${c.index} + ${c.bridgeSpreadBps}bps (as of ${c.asOf})`;
 }
