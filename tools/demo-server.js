@@ -46,6 +46,17 @@ function json(res, code, obj) {
 }
 
 const server = http.createServer((req, res) => {
+  // CORS: the intake UI is also served from russh.work (static portfolio);
+  // the passcode, not the origin, is the gate
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-demo-key');
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
   if (req.method === 'GET' && (req.url === '/' || req.url.startsWith('/?'))) {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(fs.readFileSync(UI));
