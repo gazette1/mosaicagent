@@ -33,6 +33,7 @@ import { screenDeal } from '../underwrite/screen';
 import { deepDiveDeal } from '../underwrite/deepdive';
 import { generateScreenReport } from '../report/screen-report';
 import { generateICMemo } from '../report/ic-memo';
+import { buildDealWorkbook } from '../report/workbook';
 import { auditDataExtracted, auditProxyApplied, auditSourceAdded } from '../core/audit';
 
 const program = new Command();
@@ -249,15 +250,16 @@ program
           console.log('  Parsing broker email...');
           const fileContent = fs.readFileSync(filePath, 'utf-8');
           const extracted = parseBrokerEmail(fileContent, source.id);
-          
+
           // Initialize notes array if needed
           if (!deal.extracted.notes) {
             deal.extracted.notes = [];
           }
           deal.extracted.notes.push(...extracted.notes);
-          
+
           // Apply extracted values to deal
           applyExtractedValues(deal, extracted.extractedValues, source.id);
+          applyHotelMetrics(deal, extracted.extractedValues, source.id);
           
           const avgConfidence = extracted.notes.length > 0 
             ? extracted.notes.reduce((sum, n) => sum + n.confidence, 0) / extracted.notes.length 
@@ -275,15 +277,16 @@ program
           console.log('  Parsing offering memorandum...');
           const fileContent = fs.readFileSync(filePath, 'utf-8');
           const extracted = parseOMText(fileContent, source.id);
-          
+
           // Initialize notes array if needed
           if (!deal.extracted.notes) {
             deal.extracted.notes = [];
           }
           deal.extracted.notes.push(...extracted.notes);
-          
+
           // Apply extracted values to deal
           applyExtractedValues(deal, extracted.extractedValues, source.id);
+          applyHotelMetrics(deal, extracted.extractedValues, source.id);
           
           const avgConfidence = extracted.notes.length > 0 
             ? extracted.notes.reduce((sum, n) => sum + n.confidence, 0) / extracted.notes.length 
@@ -507,6 +510,31 @@ program
       
     } catch (error) {
       console.error('Error running deep dive:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+// ============================================================================
+// WORKBOOK COMMAND - Generate the lender package workbook
+// ============================================================================
+program
+  .command('workbook')
+  .description('Generate the multi-sheet lender package XLSX (live formulas)')
+  .requiredOption('-d, --deal <dealId>', 'Deal ID')
+  .action(async (options: { deal: string }) => {
+    if (!dealExists(options.deal)) {
+      console.error(`Error: Deal not found: ${options.deal}`);
+      process.exit(1);
+    }
+    try {
+      const deal = loadDeal(options.deal);
+      const outDir = path.join(process.cwd(), 'deals', deal.dealId, 'outputs');
+      const outPath = await buildDealWorkbook(deal, outDir);
+      console.log(`✓ Workbook written: ${outPath}`);
+      console.log('  Sheets: Summary, Inputs, Pro Forma, Debt, Sensitivity, Audit');
+      console.log('  All computed cells are live formulas; Inputs carries source + confidence per value');
+    } catch (error) {
+      console.error('Error generating workbook:', error instanceof Error ? error.message : error);
       process.exit(1);
     }
   });

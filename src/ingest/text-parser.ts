@@ -82,8 +82,9 @@ const EXTRACTION_PATTERNS: ExtractionPattern[] = [
   {
     field: 'occupancy',
     patterns: [
-      /(?:occupancy|occupied)[\s:]*(\d+(?:\.\d+)?)\s*%?/i,
-      /(\d+(?:\.\d+)?)\s*%?\s*(?:occupied|leased)/i,
+      /(?:occupancy|occupied)[\s:]*(\d+(?:\.\d+)?)\s*%/i,
+      /occupancy[^%\d\n]{0,24}(\d+(?:\.\d+)?)\s*%/i, // "Occupancy (Trailing 12): 52%"
+      /(\d+(?:\.\d+)?)\s*%\s*(?:occupied|leased|occupancy)/i,
     ],
     valueType: 'percent',
     confidence: 0.7,
