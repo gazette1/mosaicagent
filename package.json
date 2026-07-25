@@ -11,7 +11,9 @@
     "mosaic": "node dist/cli/index.js",
     "dev": "ts-node src/cli/index.ts",
     "clean": "rm -rf dist",
-    "rebuild": "npm run clean && npm run build"
+    "rebuild": "npm run clean && npm run build",
+    "test": "npm run build && node --test dist/tests/tools.test.js",
+    "eval": "npm run build && node eval/run-evals.js"
   },
   "keywords": [
     "real-estate",

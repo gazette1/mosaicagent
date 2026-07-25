@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mosaic Underwriting Evals</title>
+<style>
+  :root { color-scheme: light dark; --ok: #2e7d32; --bad: #c62828; --line: #8884; }
+  body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 960px; padding: 0 1rem; }
+  h1 { font-size: 1.3rem; } h2 { font-size: 1.05rem; margin-top: 2rem; }
+  .meta { color: #888; font-size: 0.85rem; }
+  .score { font-size: 2.4rem; font-weight: 700; }
+  .delta-up { color: var(--ok); } .delta-down { color: var(--bad); }
+  table { border-collapse: collapse; width: 100%; margin-top: .5rem; }
+  th, td { text-align: left; padding: .35rem .6rem; border-bottom: 1px solid var(--line); font-size: .9rem; }
+  .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; min-width: 120px; }
+  .bar > div { height: 100%; background: var(--ok); }
+  .pass { color: var(--ok); } .fail { color: var(--bad); font-weight: 600; }
+  .hist { display: flex; align-items: flex-end; gap: 4px; height: 90px; margin-top: .5rem; }
+  .hist > div { width: 26px; background: var(--ok); opacity: .75; border-radius: 3px 3px 0 0; position: relative; }
+  .hist > div.reg { background: var(--bad); }
+  .hist > div span { position: absolute; top: -1.2rem; left: 50%; transform: translateX(-50%); font-size: .65rem; color: #888; }
+</style>
+</head>
+<body>
+<h1>Mosaic Underwriting — Eval Dashboard</h1>
+<div class="meta" id="meta"></div>
+<div class="score" id="overall"></div>
+<div id="regression"></div>
+
+<h2>Run history (overall score)</h2>
+<div class="hist" id="hist"></div>
+
+<h2>Cases</h2>
+<div id="cases"></div>
+
+<script>window.EVAL_DATA = {
+ "latest": {
+  "timestamp": "2026-07-25T13:36:17.502Z",
+  "commit": "44b3847",
+  "overall": 1,
+  "cases": [
+   {
+    "name": "industrial-samples",
+    "rubric": {
+     "correctness": 1,
+     "completeness": 1,
+     "consistency": 1,
+     "cost": 1
+    },
+    "score": 1,
+    "checks": [
+     {
+      "label": "deal created",
+      "ok": true
+     },
+     {
+      "label": "T12 NOI = 304,600",
+      "ok": true
+     },
+     {
+      "label": "NOI confidence >= 0.8",
+      "ok": true
+     },
+     {
+      "label": "rent roll: 10 units",
+      "ok": true
+     },
+     {
+      "label": "asking price extracted",
+      "ok": true
+     },
+     {
+      "label": "verdict KILL at market rates",
+      "ok": true
+     },
+     {
+      "label": "DSCR kill flag triggered",
+      "ok": true
+     },
+     {
+      "label": "entry cap 6.5-8.5%",
+      "ok": true
+     },
+     {
+      "label": "stressed DSCR 0.9-1.1x",
+      "ok": true
+     },
+     {
+      "label": "trajectory: sources before screen",
+      "ok": true
+     },
+     {
+      "label": "trajectory: no invented numbers (all tracked have source or formula)",
+      "ok": true
+     }
+    ]
+   },
+   {
+    "name": "sandcastle-hotel",
+    "rubric": {
+     "correctness": 1,
+     "completeness": 1,
+     "consistency": 1,
+     "cost": 1
+    },
+    "score": 1,
+    "checks": [
+     {
+      "label": "keys = 150",
+      "ok": true
+     },
+     {
+      "label": "ADR extracted (100-170)",
+      "ok": true
+     },
+     {
+      "label": "NOI = 2,843,000 (memo Y3)",
+      "ok": true
+     },
+     {
+      "label": "price/basis = 18.4MM order of magnitude",
+      "ok": true
+     },
+     {
+      "label": "verdict is not KILL",
+      "ok": true
+     },
+     {
+      "label": "DSCR sane (0.5-3.0x)",
+      "ok": true
+     },
+     {
+      "label": "workbook generated",
+      "ok": true
+     },
+     {
+      "label": "6 sheets present",
+      "ok": true
+     },
+     {
+      "label": "hotel rooms revenue is a formula (keys x 365 x occ x ADR)",
+      "ok": true
+     },
+     {
+      "label": "rate built as index + spread",
+      "ok": true
+     }
+    ]
+   }
+  ],
+  "regression": {
+   "prevCommit": "44b3847",
+   "prevOverall": 1,
+   "delta": 0,
+   "regressed": false,
+   "perCase": [
+    {
+     "name": "industrial-samples",
+     "delta": 0
+    },
+    {
+     "name": "sandcastle-hotel",
+     "delta": 0
+    }
+   ]
+  }
+ },
+ "history": [
+  {
+   "timestamp": "2026-07-25T13:34:53.367Z",
+   "commit": "44b3847",
+   "overall": 0.95,
+   "cases": [
+    {
+     "name": "industrial-samples",
+     "rubric": {
+      "correctness": 0.8,
+      "completeness": 1,
+      "consistency": 1,
+      "cost": 1
+     },
+     "score": 0.9,
+     "checks": [
+      {
+       "label": "deal created",
+       "ok": true
+      },
+      {
+       "label": "T12 NOI = 304,600",
+       "ok": true
+      },
+      {
+       "label": "NOI confidence >= 0.8",
+       "ok": true
+      },
+      {
+       "label": "rent roll: 10 units",
+       "ok": true
+      },
+      {
+       "label": "asking price extracted",
+       "ok": true
+      },
+      {
+       "label": "verdict CHASE",
+       "ok": false
+      },
+      {
+       "label": "entry cap 6.5-8.5%",
+       "ok": true
+      },
+      {
+       "label": "stressed DSCR 1.0-1.4x",
+       "ok": false
+      },
+      {
+       "label": "trajectory: sources before screen",
+       "ok": true
+      },
+      {
+       "label": "trajectory: no invented numbers (all tracked have source or formula)",
+       "ok": true
+      }
+     ]
+    },
+    {
+     "name": "sandcastle-hotel",
+     "rubric": {
+      "correctness": 1,
+      "completeness": 1,
+      "consistency": 1,
+      "cost": 1
+     },
+     "score": 1,
+     "checks": [
+      {
+       "label": "keys = 150",
+       "ok": true
+      },
+      {
+       "label": "ADR extracted (100-170)",
+       "ok": true
+      },
+      {
+       "label": "NOI = 2,843,000 (memo Y3)",
+       "ok": true
+      },
+      {
+       "label": "price/basis = 18.4MM order of magnitude",
+       "ok": true
+      },
+      {
+       "label": "verdict is not KILL",
+       "ok": true
+      },
+      {
+       "label": "DSCR sane (0.5-3.0x)",
+       "ok": true
+      },
+      {
+       "label": "workbook generated",
+       "ok": true
+      },
+      {
+       "label": "6 sheets present",
+       "ok": true
+      },
+      {
+       "label": "hotel rooms revenue is a formula (keys x 365 x occ x ADR)",
+       "ok": true
+      },
+      {
+       "label": "rate built as index + spread",
+       "ok": true
+      }
+     ]
+    }
+   ],
+   "regression": null
+  },
+  {
+   "timestamp": "2026-07-25T13:35:39.968Z",
+   "commit": "44b3847",
+   "overall": 1,
+   "cases": [
+    {
+     "name": "industrial-samples",
+     "rubric": {
+      "correctness": 1,
+      "completeness": 1,
+      "consistency": 1,
+      "cost": 1
+     },
+     "score": 1,
+     "checks": [
+      {
+       "label": "deal created",
+       "ok": true
+      },
+      {
+       "label": "T12 NOI = 304,600",
+       "ok": true
+      },
+      {
+       "label": "NOI confidence >= 0.8",
+       "ok": true
+      },
+      {
+       "label": "rent roll: 10 units",
+       "ok": true
+      },
+      {
+       "label": "asking price extracted",
+       "ok": true
+      },
+      {
+       "label": "verdict KILL at market rates",
+       "ok": true
+      },
+      {
+       "label": "DSCR kill flag triggered",
+       "ok": true
+      },
+      {
+       "label": "entry cap 6.5-8.5%",
+       "ok": true
+      },
+      {
+       "label": "stressed DSCR 0.9-1.1x",
+       "ok": true
+      },
+      {
+       "label": "trajectory: sources before screen",
+       "ok": true
+      },
+      {
+       "label": "trajectory: no invented numbers (all tracked have source or formula)",
+       "ok": true
+      }
+     ]
+    },
+    {
+     "name": "sandcastle-hotel",
+     "rubric": {
+      "correctness": 1,
+      "completeness": 1,
+      "consistency": 1,
+      "cost": 1
+     },
+     "score": 1,
+     "checks": [
+      {
+       "label": "keys = 150",
+       "ok": true
+      },
+      {
+       "label": "ADR extracted (100-170)",
+       "ok": true
+      },
+      {
+       "label": "NOI = 2,843,000 (memo Y3)",
+       "ok": true
+      },
+      {
+       "label": "price/basis = 18.4MM order of magnitude",
+       "ok": true
+      },
+      {
+       "label": "verdict is not KILL",
+       "ok": true
+      },
+      {
+       "label": "DSCR sane (0.5-3.0x)",
+       "ok": true
+      },
+      {
+       "label": "workbook generated",
+       "ok": true
+      },
+      {
+       "label": "6 sheets present",
+       "ok": true
+      },
+      {
+       "label": "hotel rooms revenue is a formula (keys x 365 x occ x ADR)",
+       "ok": true
+      },
+      {
+       "label": "rate built as index + spread",
+       "ok": true
+      }
+     ]
+    }
+   ],
+   "regression": {
+    "prevCommit": "44b3847",
+    "prevOverall": 0.95,
+    "delta": 0.05,
+    "regressed": false,
+    "perCase": [
+     {
+      "name": "industrial-samples",
+      "delta": 0.1
+     },
+     {
+      "name": "sandcastle-hotel",
+      "delta": 0
+     }
+    ]
+   }
+  },
+  {
+   "timestamp": "2026-07-25T13:36:17.502Z",
+   "commit": "44b3847",
+   "overall": 1,
+   "cases": [
+    {
+     "name": "industrial-samples",
+     "rubric": {
+      "correctness": 1,
+      "completeness": 1,
+      "consistency": 1,
+      "cost": 1
+     },
+     "score": 1,
+     "checks": [
+      {
+       "label": "deal created",
+       "ok": true
+      },
+      {
+       "label": "T12 NOI = 304,600",
+       "ok": true
+      },
+      {
+       "label": "NOI confidence >= 0.8",
+       "ok": true
+      },
+      {
+       "label": "rent roll: 10 units",
+       "ok": true
+      },
+      {
+       "label": "asking price extracted",
+       "ok": true
+      },
+      {
+       "label": "verdict KILL at market rates",
+       "ok": true
+      },
+      {
+       "label": "DSCR kill flag triggered",
+       "ok": true
+      },
+      {
+       "label": "entry cap 6.5-8.5%",
+       "ok": true
+      },
+      {
+       "label": "stressed DSCR 0.9-1.1x",
+       "ok": true
+      },
+      {
+       "label": "trajectory: sources before screen",
+       "ok": true
+      },
+      {
+       "label": "trajectory: no invented numbers (all tracked have source or formula)",
+       "ok": true
+      }
+     ]
+    },
+    {
+     "name": "sandcastle-hotel",
+     "rubric": {
+      "correctness": 1,
+      "completeness": 1,
+      "consistency": 1,
+      "cost": 1
+     },
+     "score": 1,
+     "checks": [
+      {
+       "label": "keys = 150",
+       "ok": true
+      },
+      {
+       "label": "ADR extracted (100-170)",
+       "ok": true
+      },
+      {
+       "label": "NOI = 2,843,000 (memo Y3)",
+       "ok": true
+      },
+      {
+       "label": "price/basis = 18.4MM order of magnitude",
+       "ok": true
+      },
+      {
+       "label": "verdict is not KILL",
+       "ok": true
+      },
+      {
+       "label": "DSCR sane (0.5-3.0x)",
+       "ok": true
+      },
+      {
+       "label": "workbook generated",
+       "ok": true
+      },
+      {
+       "label": "6 sheets present",
+       "ok": true
+      },
+      {
+       "label": "hotel rooms revenue is a formula (keys x 365 x occ x ADR)",
+       "ok": true
+      },
+      {
+       "label": "rate built as index + spread",
+       "ok": true
+      }
+     ]
+    }
+   ],
+   "regression": {
+    "prevCommit": "44b3847",
+    "prevOverall": 1,
+    "delta": 0,
+    "regressed": false,
+    "perCase": [
+     {
+      "name": "industrial-samples",
+      "delta": 0
+     },
+     {
+      "name": "sandcastle-hotel",
+      "delta": 0
+     }
+    ]
+   }
+  }
+ ]
+};</script>
+<script>
+  const D = window.EVAL_DATA;
+  if (!D) { document.body.innerHTML += '<p>No results yet. Run: node eval/run-evals.js</p>'; }
+  else {
+    const L = D.latest;
+    document.getElementById('meta').textContent = `commit ${L.commit} — ${L.timestamp}`;
+    document.getElementById('overall').textContent = (L.overall * 100).toFixed(1) + '%';
+    if (L.regression) {
+      const r = L.regression;
+      const cls = r.delta >= 0 ? 'delta-up' : 'delta-down';
+      document.getElementById('regression').innerHTML =
+        `vs ${r.prevCommit}: <span class="${cls}">${r.delta >= 0 ? '+' : ''}${(r.delta * 100).toFixed(1)}%</span>` +
+        (r.regressed ? ' <span class="fail">REGRESSION</span>' : '');
+    }
+    const hist = document.getElementById('hist');
+    for (const run of D.history.slice(-25)) {
+      const bar = document.createElement('div');
+      bar.style.height = (run.overall * 100) + '%';
+      if (run.regression && run.regression.regressed) bar.className = 'reg';
+      bar.title = `${run.commit}: ${(run.overall * 100).toFixed(1)}%`;
+      const s = document.createElement('span'); s.textContent = run.commit.substring(0, 4);
+      bar.appendChild(s);
+      hist.appendChild(bar);
+    }
+    const casesEl = document.getElementById('cases');
+    for (const c of L.cases) {
+      const dims = Object.entries(c.rubric).map(([k, v]) =>
+        `<tr><td>${k}</td><td><div class="bar"><div style="width:${v * 100}%"></div></div></td><td>${(v * 100).toFixed(0)}%</td></tr>`).join('');
+      const checks = c.checks.map(ch =>
+        `<tr><td class="${ch.ok ? 'pass' : 'fail'}">${ch.ok ? 'PASS' : 'FAIL'}</td><td>${ch.label}</td></tr>`).join('');
+      casesEl.innerHTML +=
+        `<h3>${c.name} — ${(c.score * 100).toFixed(1)}%</h3>
+         <table>${dims}</table>
+         <table>${checks}</table>`;
+    }
+  }
+</script>
+</body>
+</html>
