@@ -1,0 +1,38 @@
+{
+  "name": "mosaic-underwriting",
+  "version": "1.0.0",
+  "description": "Local-first CLI for real estate deal underwriting - Screen and analyze acquisition opportunities",
+  "main": "dist/index.js",
+  "bin": {
+    "mosaic": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "mosaic": "node dist/cli/index.js",
+    "dev": "ts-node src/cli/index.ts",
+    "clean": "rm -rf dist",
+    "rebuild": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "real-estate",
+    "underwriting",
+    "acquisitions",
+    "cli"
+  ],
+  "author": "Mosaic",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^11.1.0",
+    "papaparse": "^5.4.1",
+    "xlsx": "^0.18.5",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/papaparse": "^5.3.14",
+    "typescript": "^5.3.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
