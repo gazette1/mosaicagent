@@ -30,7 +30,7 @@ import { parseBrokerEmail, parseOMText, extractFromText } from '../ingest/text-p
 import { extractFromPdf } from '../ingest/pdf-extractor';
 import { ASSET_TYPE_CRITERIA } from '../core/doctrine';
 import { llmAvailable } from '../llm/client';
-import { extractWithLlm } from '../ingest/llm-extractor';
+import { extractWithLlm, extractWithOcrPdf, extractWithOcrImage, LlmExtractionOutcome } from '../ingest/llm-extractor';
 import { generateNarrative } from '../report/narrative';
 import { screenDeal } from '../underwrite/screen';
 import { deepDiveDeal } from '../underwrite/deepdive';
@@ -53,10 +53,10 @@ program
   .command('new')
   .description('Create a new deal folder')
   .requiredOption('-n, --name <n>', 'Deal name')
-  .requiredOption('-t, --type <type>', 'Asset type (industrial, retail, multifamily, hotel, other)')
+  .requiredOption('-t, --type <type>', 'Asset type (industrial, retail, multifamily, hotel, lihtc, other)')
   .option('-l, --location <location>', 'Property location')
   .action((options: { name: string; type: string; location?: string }) => {
-    const validTypes: AssetType[] = ['industrial', 'retail', 'multifamily', 'hotel', 'other'];
+    const validTypes: AssetType[] = ['industrial', 'retail', 'multifamily', 'hotel', 'lihtc', 'other'];
     
     if (!validTypes.includes(options.type as AssetType)) {
       console.error(`Error: Invalid asset type "${options.type}". Must be one of: ${validTypes.join(', ')}`);
@@ -123,9 +123,9 @@ program
   .description('Ingest a source file into a deal')
   .requiredOption('-d, --deal <dealId>', 'Deal ID')
   .requiredOption('-f, --file <path>', 'Path to source file')
-  .requiredOption('-k, --kind <kind>', 'Source type (email, om_text, rentroll_csv, t12_csv, pdf, xlsx_model)')
+  .requiredOption('-k, --kind <kind>', 'Source type (email, om_text, rentroll_csv, t12_csv, pdf, xlsx_model, image)')
   .action(async (options: { deal: string; file: string; kind: string }) => {
-    const validKinds: Source['kind'][] = ['email', 'om_text', 'rentroll_csv', 't12_csv', 'pdf', 'xlsx_model', 'manual'];
+    const validKinds: Source['kind'][] = ['email', 'om_text', 'rentroll_csv', 't12_csv', 'pdf', 'xlsx_model', 'image', 'manual'];
     
     if (!validKinds.includes(options.kind as Source['kind'])) {
       console.error(`Error: Invalid kind "${options.kind}". Must be one of: ${validKinds.join(', ')}`);
@@ -314,6 +314,20 @@ program
           applyHotelMetrics(deal, extracted.extractedValues, source.id);
           await maybeLlmAugment(deal, extracted.extractedValues, extracted.rawText, source.id);
 
+          // OCR fallback: image-based PDFs have a near-empty text layer.
+          // Send the PDF itself to the extraction model (server-side OCR).
+          const textPerPage = extracted.pageCount > 0 ? extracted.rawText.length / extracted.pageCount : 0;
+          const fieldsSoFar = (deal.extracted.notes ?? []).filter(n => n.sourceId === source.id).length;
+          if (llmAvailable() && (extracted.rawText.length < 2000 || textPerPage < 200) && fieldsSoFar < 4) {
+            try {
+              console.log(`  Text layer thin (${extracted.rawText.length} chars / ${extracted.pageCount} pages) - running OCR pass...`);
+              const ocr = await extractWithOcrPdf(filePath, source.id, {});
+              applyLlmOutcome(deal, ocr, source.id, 'OCR_EXTRACTION');
+            } catch (e) {
+              console.warn(`  OCR pass failed: ${e instanceof Error ? e.message : e}`);
+            }
+          }
+
           const avgConfidence = extracted.notes.length > 0
             ? extracted.notes.reduce((sum, n) => sum + n.confidence, 0) / extracted.notes.length
             : 0.5;
@@ -343,6 +357,22 @@ program
           console.log(`  ✓ Extracted ${extracted.notes.length} data points across sheets`);
           for (const note of extracted.notes) {
             console.log(`    - ${note.field}: ${note.extractedValue} (confidence: ${note.confidence.toFixed(2)})`);
+          }
+          break;
+        }
+
+        case 'image': {
+          if (!llmAvailable()) {
+            console.error('  Image ingest requires OPENAI_API_KEY (.env) for the OCR pass');
+            break;
+          }
+          console.log('  Running OCR/vision extraction on image...');
+          try {
+            const ocr = await extractWithOcrImage(filePath, source.id, {});
+            applyLlmOutcome(deal, ocr, source.id, 'OCR_EXTRACTION');
+            auditDataExtracted(deal, source.id, 'image', ocr.merged, 0.6);
+          } catch (e) {
+            console.warn(`  OCR failed: ${e instanceof Error ? e.message : e}`);
           }
           break;
         }
@@ -739,29 +769,39 @@ async function maybeLlmAugment(
   try {
     console.log(`  Deterministic extraction thin (${found} fields) - running LLM pass (routed: extraction tier)...`);
     const out = await extractWithLlm(rawText, sourceId, extractedValues);
-    if (!deal.extracted.notes) deal.extracted.notes = [];
-    deal.extracted.notes.push(...out.notes);
-    applyExtractedValues(deal, out.values, sourceId);
-    applyHotelMetrics(deal, out.values, sourceId);
-    deal.auditLog.push({
-      timestamp: new Date().toISOString(),
-      action: 'LLM_EXTRACTION',
-      details: {
-        sourceId,
-        model: out.usage.model,
-        fieldsAdded: out.merged,
-        inputTokens: out.usage.inputTokens,
-        outputTokens: out.usage.outputTokens,
-        estCostUsd: +out.usage.estCostUsd.toFixed(5),
-        attempts: out.usage.attempts,
-      },
-    });
-    console.log(`  ✓ LLM added ${out.merged} fields (${out.usage.model}, ${out.usage.inputTokens} in / ${out.usage.outputTokens} out, ~$${out.usage.estCostUsd.toFixed(4)})`);
-    for (const n of out.notes) {
-      console.log(`    + ${n.field}: ${n.extractedValue} (confidence: ${n.confidence.toFixed(2)})`);
-    }
+    applyLlmOutcome(deal, out, sourceId, 'LLM_EXTRACTION');
   } catch (e) {
     console.warn(`  LLM pass failed (kept deterministic results): ${e instanceof Error ? e.message : e}`);
+  }
+}
+
+/** Merge an LLM extraction outcome into the deal with cost audit-logged. */
+function applyLlmOutcome(
+  deal: ReturnType<typeof loadDeal>,
+  out: LlmExtractionOutcome,
+  sourceId: string,
+  action: string
+): void {
+  if (!deal.extracted.notes) deal.extracted.notes = [];
+  deal.extracted.notes.push(...out.notes);
+  applyExtractedValues(deal, out.values, sourceId);
+  applyHotelMetrics(deal, out.values, sourceId);
+  deal.auditLog.push({
+    timestamp: new Date().toISOString(),
+    action,
+    details: {
+      sourceId,
+      model: out.usage.model,
+      fieldsAdded: out.merged,
+      inputTokens: out.usage.inputTokens,
+      outputTokens: out.usage.outputTokens,
+      estCostUsd: +out.usage.estCostUsd.toFixed(5),
+      attempts: out.usage.attempts,
+    },
+  });
+  console.log(`  ✓ ${action === 'OCR_EXTRACTION' ? 'OCR' : 'LLM'} added ${out.merged} fields (${out.usage.model}, ${out.usage.inputTokens} in / ${out.usage.outputTokens} out, ~$${out.usage.estCostUsd.toFixed(4)})`);
+  for (const n of out.notes) {
+    console.log(`    + ${n.field}: ${n.extractedValue} (confidence: ${n.confidence.toFixed(2)})`);
   }
 }
 

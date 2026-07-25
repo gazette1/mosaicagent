@@ -9,7 +9,15 @@
   h1 { font-size: 1.35rem; margin-bottom: .2rem; } .sub { color: #888; font-size: .85rem; margin-bottom: 1.4rem; }
   .row { display: flex; gap: .8rem; flex-wrap: wrap; margin-bottom: .9rem; }
   label { font-size: .8rem; color: #888; display: block; margin-bottom: .2rem; }
-  input[type=text], select { padding: .45rem .6rem; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; min-width: 180px; }
+  input[type=text], select { padding: .45rem .6rem; border: 1px solid var(--line); border-radius: 6px; min-width: 180px; font-size: .95rem; }
+  input[type=text] { background: transparent; color: inherit; }
+  /* Explicit colors on select/option: transparent backgrounds render white-on-white dropdowns in dark mode */
+  select { background: #fff; color: #111; }
+  select option { background: #fff; color: #111; }
+  @media (prefers-color-scheme: dark) {
+    select { background: #1e1e1e; color: #eee; border-color: #666; }
+    select option { background: #1e1e1e; color: #eee; }
+  }
   #drop { border: 2px dashed var(--line); border-radius: 10px; padding: 2.2rem; text-align: center; color: #888; cursor: pointer; transition: border-color .15s; }
   #drop.hover { border-color: var(--acc); color: var(--acc); }
   #filelist { margin: .8rem 0; font-size: .85rem; } #filelist li { margin: .15rem 0; }
@@ -35,17 +43,18 @@
   <div><label>Deal name</label><input type="text" id="name" placeholder="Oceanfront Hotel Acquisition"></div>
   <div><label>Asset type</label>
     <select id="type">
-      <option value="hotel">hotel</option>
-      <option value="industrial">industrial</option>
-      <option value="retail">retail</option>
-      <option value="multifamily">multifamily</option>
-      <option value="other" selected>other</option>
+      <option value="hotel">Hotel</option>
+      <option value="industrial">Industrial</option>
+      <option value="retail">Retail</option>
+      <option value="multifamily">Multifamily</option>
+      <option value="lihtc">LIHTC (affordable)</option>
+      <option value="other" selected>Other</option>
     </select>
   </div>
   <div><label>Location</label><input type="text" id="location" placeholder="City, ST"></div>
 </div>
 
-<div id="drop">Drop deal documents here or click to browse<br><span style="font-size:.75rem">PDF, XLSX, CSV, MD, TXT (DOCX pending)</span></div>
+<div id="drop">Drop deal documents here or click to browse<br><span style="font-size:.75rem">PDF, XLSX, CSV, MD, TXT, PNG/JPG (image-based docs get an OCR pass; DOCX pending)</span></div>
 <input type="file" id="picker" multiple style="display:none">
 <ul id="filelist"></ul>
 

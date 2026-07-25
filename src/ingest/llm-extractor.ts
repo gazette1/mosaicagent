@@ -7,7 +7,9 @@
  * ranges as regex output; the model gets no license to invent numbers.
  */
 
-import { callJson, LlmUsage } from '../llm/client';
+import * as fs from 'fs';
+import * as path from 'path';
+import { callJson, LlmUsage, UserContent } from '../llm/client';
 import { ExtractedNote } from '../core/schemas';
 import { passesSanity } from './text-parser';
 
@@ -53,19 +55,15 @@ export interface LlmExtractionOutcome {
 
 type FieldHit = { value: number | string; quote: string; confidence: number } | null;
 
-export async function extractWithLlm(
-  text: string,
+async function runExtraction(
+  userContent: UserContent,
   sourceId: string,
   already: Record<string, unknown>
 ): Promise<LlmExtractionOutcome> {
-  // Cap the input: first 60K chars covers any memo/OM body; appraisals get
-  // their leading sections which carry the value conclusions
-  const doc = text.length > 60_000 ? text.substring(0, 60_000) : text;
-
   const { data, usage } = await callJson<Record<string, FieldHit>>(
     'extraction',
     SYSTEM,
-    `Extract deal facts from this document:\n\n${doc}`,
+    userContent,
     'deal_extraction',
     SCHEMA,
     1500
@@ -93,4 +91,70 @@ export async function extractWithLlm(
   }
 
   return { merged, usage, notes, values };
+}
+
+/** Text-based LLM extraction (documents whose text layer parsed). */
+export async function extractWithLlm(
+  text: string,
+  sourceId: string,
+  already: Record<string, unknown>
+): Promise<LlmExtractionOutcome> {
+  // Cap the input: first 60K chars covers any memo/OM body; appraisals get
+  // their leading sections which carry the value conclusions
+  const doc = text.length > 60_000 ? text.substring(0, 60_000) : text;
+  return runExtraction(`Extract deal facts from this document:\n\n${doc}`, sourceId, already);
+}
+
+const MAX_OCR_BYTES = 25 * 1024 * 1024;
+
+/**
+ * OCR/vision extraction: sends the PDF itself to the extraction model
+ * (OCR happens server-side). For image-based teasers and brochures whose
+ * text layer is empty.
+ */
+export async function extractWithOcrPdf(
+  filePath: string,
+  sourceId: string,
+  already: Record<string, unknown>
+): Promise<LlmExtractionOutcome> {
+  const stat = fs.statSync(filePath);
+  if (stat.size > MAX_OCR_BYTES) {
+    throw new Error(`PDF too large for OCR pass (${(stat.size / 1e6).toFixed(0)}MB > 25MB)`);
+  }
+  const b64 = fs.readFileSync(filePath).toString('base64');
+  return runExtraction(
+    [
+      { type: 'file', file: { filename: path.basename(filePath), file_data: `data:application/pdf;base64,${b64}` } },
+      { type: 'text', text: 'Extract deal facts from this document. It may be image-based; read the images.' },
+    ],
+    sourceId,
+    already
+  );
+}
+
+const IMAGE_MIME: Record<string, string> = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif',
+};
+
+/** OCR/vision extraction for image files (photographed rent rolls, scans). */
+export async function extractWithOcrImage(
+  filePath: string,
+  sourceId: string,
+  already: Record<string, unknown>
+): Promise<LlmExtractionOutcome> {
+  const mime = IMAGE_MIME[path.extname(filePath).toLowerCase()];
+  if (!mime) throw new Error(`Unsupported image type: ${path.extname(filePath)}`);
+  const stat = fs.statSync(filePath);
+  if (stat.size > MAX_OCR_BYTES) {
+    throw new Error(`Image too large for OCR pass (${(stat.size / 1e6).toFixed(0)}MB > 25MB)`);
+  }
+  const b64 = fs.readFileSync(filePath).toString('base64');
+  return runExtraction(
+    [
+      { type: 'image_url', image_url: { url: `data:${mime};base64,${b64}` } },
+      { type: 'text', text: 'Extract deal facts from this document image.' },
+    ],
+    sourceId,
+    already
+  );
 }

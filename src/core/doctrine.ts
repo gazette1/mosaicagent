@@ -94,6 +94,24 @@ export const ASSET_TYPE_CRITERIA: Record<AssetType, {
     defaultVacancy: 0.30, // 1 - stabilized occupancy ~70%
     defaultExpenseRatio: 0.62, // full-service departmental expense load
   },
+  lihtc: {
+    description: 'LIHTC affordable housing (Section 42)',
+    idealProfile: [
+      'Credits placed and stabilized, or clean 9%/4% allocation path',
+      'HAP contract or deep waiting list supporting occupancy',
+      'Experienced LIHTC sponsor with compliance track record',
+      'Clear Year-15 strategy (resyndication, qualified contract, preservation buyer)',
+    ],
+    redFlags: [
+      'Compliance-period recapture risk (Section 42 violations)',
+      'Expiring LURA or unclear Year-15 exit',
+      'Deferred developer fee dependency in the cash flow',
+      'Thin DSCR against restricted rents with rising opex',
+    ],
+    defaultCaps: { entry: 0.0575, exit: 0.065 },
+    defaultVacancy: 0.04, // waitlist-backed occupancy runs high
+    defaultExpenseRatio: 0.52, // compliance and regulatory load on top of ops
+  },
   other: {
     description: 'Non-core asset type',
     idealProfile: ['Evaluate on case-by-case basis'],
@@ -300,6 +318,7 @@ export const SOURCE_PRIORITY: Record<string, number> = {
   'xlsx_model': 3, // Sponsor model workbook
   'om_text': 4, // Offering memorandum
   'pdf': 4, // PDF documents (OM/appraisal/memo tier)
+  'image': 4, // Image documents via OCR/vision (same trust tier as PDF)
   'email': 5, // Broker email
   'manual': 6, // Manual entry
   'computed': 7, // Calculated value

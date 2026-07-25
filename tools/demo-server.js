@@ -23,6 +23,7 @@ function kindFor(filename) {
   if (ext === '.csv') return base.includes('rent') ? 'rentroll_csv' : 't12_csv';
   if (ext === '.eml') return 'email';
   if (ext === '.md' || ext === '.txt') return 'om_text';
+  if (['.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(ext)) return 'image';
   return null;
 }
 

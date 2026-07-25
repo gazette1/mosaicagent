@@ -64,14 +64,24 @@ export interface LlmJsonResult<T = unknown> {
   usage: LlmUsage;
 }
 
+/** Content parts for multimodal calls (text, files for server-side OCR, images) */
+export type UserContent =
+  | string
+  | Array<
+      | { type: 'text'; text: string }
+      | { type: 'file'; file: { filename: string; file_data: string } }
+      | { type: 'image_url'; image_url: { url: string } }
+    >;
+
 /**
  * Call a routed model with a JSON-schema-constrained response.
  * role: which routing tier to use ('extraction' | 'judge' | 'narrative' | 'escalation')
+ * user may be plain text or multimodal parts (PDF files are OCRed server-side).
  */
 export async function callJson<T = unknown>(
   role: string,
   system: string,
-  user: string,
+  user: UserContent,
   schemaName: string,
   schema: Record<string, unknown>,
   maxOutputTokens = 2000

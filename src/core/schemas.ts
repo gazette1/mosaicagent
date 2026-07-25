@@ -9,10 +9,10 @@ import { z } from 'zod';
 // Base Types
 // ============================================================================
 
-export const AssetTypeSchema = z.enum(['industrial', 'retail', 'multifamily', 'hotel', 'other']);
+export const AssetTypeSchema = z.enum(['industrial', 'retail', 'multifamily', 'hotel', 'lihtc', 'other']);
 export type AssetType = z.infer<typeof AssetTypeSchema>;
 
-export const SourceKindSchema = z.enum(['email', 'om_text', 'rentroll_csv', 't12_csv', 'pdf', 'xlsx_model', 'manual', 'computed']);
+export const SourceKindSchema = z.enum(['email', 'om_text', 'rentroll_csv', 't12_csv', 'pdf', 'xlsx_model', 'image', 'manual', 'computed']);
 export type SourceKind = z.infer<typeof SourceKindSchema>;
 
 export const VerdictSchema = z.enum(['KILL', 'CHASE', 'STRUCTURE', 'DELEGATE']);
