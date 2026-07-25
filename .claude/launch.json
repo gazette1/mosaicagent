@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mosaic-demo",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["tools/demo-server.js"],
+      "port": 8787
+    }
+  ]
+}

@@ -131,13 +131,18 @@ export async function buildDealWorkbook(deal: Deal, outDir: string): Promise<str
     dt.addRow(['LTV', { formula: refs['ltv'].addr }, '']);
     dt.addRow(['Loan Amount', 0, 'Cannot size without basis']);
   }
-  dt.addRow(['Annual Debt Service (IO)', { formula: 'B9*B6' }, '= loan x stressed rate (IO)']);
+  dt.addRow(['Annual Debt Service (IO)', { formula: 'B9*B6' }, '= loan x stressed rate (IO, bridge convention)']);
   dt.addRow(['NOI', { formula: noiAddr }, 'Pro Forma']);
-  dt.addRow(['DSCR (stressed)', { formula: 'IF(B10=0,"n/a",B11/B10)' }, '= NOI / debt service']);
+  dt.addRow(['DSCR (stressed, IO)', { formula: 'IF(B10=0,"n/a",B11/B10)' }, '= NOI / IO debt service']);
   dt.addRow(['Debt Yield', { formula: 'IF(B9=0,"n/a",B11/B9)' }, '= NOI / loan']);
-  ['B7', 'B9', 'B10', 'B11'].forEach(c => (dt.getCell(c).numFmt = MONEY));
-  ['B2', 'B4', 'B5', 'B6', 'B8', 'B13'].forEach(c => (dt.getCell(c).numFmt = PCT));
+  dt.addRow(['Amortization (years)', 30, 'Amortizing alternative / perm convention']);
+  dt.addRow(['Loan Constant', { formula: '(B6/12*POWER(1+B6/12,B14*12))/(POWER(1+B6/12,B14*12)-1)*12' }, 'Monthly payment constant, annualized, at stressed rate']);
+  dt.addRow(['Annual Debt Service (amortizing)', { formula: 'B9*B15' }, '= loan x constant']);
+  dt.addRow(['DSCR (stressed, amortizing)', { formula: 'IF(B16=0,"n/a",B11/B16)' }, '= NOI / amortizing debt service']);
+  ['B7', 'B9', 'B10', 'B11', 'B16'].forEach(c => (dt.getCell(c).numFmt = MONEY));
+  ['B2', 'B4', 'B5', 'B6', 'B8', 'B13', 'B15'].forEach(c => (dt.getCell(c).numFmt = PCT));
   dt.getCell('B12').numFmt = X;
+  dt.getCell('B17').numFmt = X;
 
   // ==========================================================================
   // Sensitivity: DSCR, rate deltas x NOI deltas

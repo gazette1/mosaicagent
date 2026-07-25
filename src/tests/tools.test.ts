@@ -94,6 +94,26 @@ test('doctrine: hotel asset criteria exist', () => {
   assert.ok(h.defaultExpenseRatio > 0.5 && h.defaultExpenseRatio < 0.75);
 });
 
+// ============================================================================
+// Debt math
+// ============================================================================
+
+import { loanConstant, annualDebtService, sizeLoanToDscr } from '../core/debt-math';
+
+test('debt math: loan constant and debt service', () => {
+  // 6.5% 30-year: constant ~7.58%
+  const c = loanConstant(0.065, 30);
+  assert.ok(c > 0.0755 && c < 0.0762, `constant ${c}`);
+  // IO debt service
+  assert.strictEqual(annualDebtService(18400000, 0.093, null), 18400000 * 0.093);
+  // Amortizing exceeds IO at same rate
+  assert.ok(annualDebtService(18400000, 0.093, 30) > 18400000 * 0.093);
+  // Sizing round-trips: loan sized to 1.30x produces DSCR 1.30x
+  const loan = sizeLoanToDscr(2843000, 1.3, 0.065, 30);
+  const dscr = 2843000 / annualDebtService(loan, 0.065, 30);
+  assert.ok(Math.abs(dscr - 1.3) < 0.001, `dscr ${dscr}`);
+});
+
 test('doctrine: source priority ranks statements above marketing', () => {
   assert.ok(SOURCE_PRIORITY['t12_csv'] < SOURCE_PRIORITY['om_text']);
   assert.ok(SOURCE_PRIORITY['xlsx_model'] < SOURCE_PRIORITY['email']);

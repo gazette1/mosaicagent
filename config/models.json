@@ -1,0 +1,16 @@
+{
+  "provider": "openai",
+  "routing": {
+    "extraction": "gpt-5.4-nano",
+    "judge": "gpt-5.4-nano",
+    "narrative": "gpt-5.4-mini",
+    "escalation": "gpt-5.5"
+  },
+  "estPricePer1M": {
+    "gpt-5.4-nano": { "input": 0.05, "output": 0.4 },
+    "gpt-5.4-mini": { "input": 0.25, "output": 2.0 },
+    "gpt-5.4": { "input": 1.25, "output": 10.0 },
+    "gpt-5.5": { "input": 2.0, "output": 16.0 }
+  },
+  "notes": "Routing is scaled by price: cheapest tier that can do the job. Prices are ESTIMATES patterned on prior OpenAI tier pricing; verify at platform.openai.com/docs/pricing before quoting costs to anyone. Cost lines in audit logs are estimates."
+}

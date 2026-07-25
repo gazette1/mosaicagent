@@ -211,9 +211,10 @@ const SANITY_RANGES: Record<string, [number, number]> = {
   totalSF: [500, 50_000_000],
   yearBuilt: [1850, 2035],
   rentPerSF: [0.25, 500],
+  loanRequest: [250_000, 5_000_000_000],
 };
 
-function passesSanity(field: string, value: number | string): boolean {
+export function passesSanity(field: string, value: number | string): boolean {
   if (typeof value !== 'number') return true;
   const range = SANITY_RANGES[field];
   if (!range) return true;

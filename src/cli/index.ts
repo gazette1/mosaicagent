@@ -29,6 +29,9 @@ import { normalizeT12, estimateNoiFromRentRoll } from '../ingest/t12-normalizer'
 import { parseBrokerEmail, parseOMText, extractFromText } from '../ingest/text-parser';
 import { extractFromPdf } from '../ingest/pdf-extractor';
 import { ASSET_TYPE_CRITERIA } from '../core/doctrine';
+import { llmAvailable } from '../llm/client';
+import { extractWithLlm } from '../ingest/llm-extractor';
+import { generateNarrative } from '../report/narrative';
 import { screenDeal } from '../underwrite/screen';
 import { deepDiveDeal } from '../underwrite/deepdive';
 import { generateScreenReport } from '../report/screen-report';
@@ -309,6 +312,7 @@ program
           deal.extracted.notes.push(...extracted.notes);
           applyExtractedValues(deal, extracted.extractedValues, source.id);
           applyHotelMetrics(deal, extracted.extractedValues, source.id);
+          await maybeLlmAugment(deal, extracted.extractedValues, extracted.rawText, source.id);
 
           const avgConfidence = extracted.notes.length > 0
             ? extracted.notes.reduce((sum, n) => sum + n.confidence, 0) / extracted.notes.length
@@ -333,6 +337,7 @@ program
           deal.extracted.notes.push(...extracted.notes);
           applyExtractedValues(deal, extracted.extractedValues, source.id);
           applyHotelMetrics(deal, extracted.extractedValues, source.id);
+          await maybeLlmAugment(deal, extracted.extractedValues, wbParsed.asText, source.id);
 
           auditDataExtracted(deal, source.id, 'xlsx_model', extracted.notes.length, 0.6);
           console.log(`  ✓ Extracted ${extracted.notes.length} data points across sheets`);
@@ -515,6 +520,47 @@ program
   });
 
 // ============================================================================
+// NARRATIVE COMMAND - LLM draft of the package prose (human owns judgment)
+// ============================================================================
+program
+  .command('narrative')
+  .description('Draft package narrative sections from deal facts (LLM, DRAFT)')
+  .requiredOption('-d, --deal <dealId>', 'Deal ID')
+  .action(async (options: { deal: string }) => {
+    if (!dealExists(options.deal)) {
+      console.error(`Error: Deal not found: ${options.deal}`);
+      process.exit(1);
+    }
+    if (!llmAvailable()) {
+      console.error('Error: OPENAI_API_KEY not set (.env)');
+      process.exit(1);
+    }
+    try {
+      const deal = loadDeal(options.deal);
+      console.log('Drafting narrative (routed: narrative tier)...');
+      const result = await generateNarrative(deal);
+      const outPath = writeOutput(deal.dealId, 'narrative.md', result.markdown);
+      deal.auditLog.push({
+        timestamp: new Date().toISOString(),
+        action: 'NARRATIVE_DRAFTED',
+        details: {
+          model: result.usage.model,
+          inputTokens: result.usage.inputTokens,
+          outputTokens: result.usage.outputTokens,
+          estCostUsd: +result.usage.estCostUsd.toFixed(5),
+        },
+      });
+      saveDeal(deal);
+      console.log(`✓ Narrative draft: ${outPath}`);
+      console.log(`  ${result.usage.model}, ${result.usage.inputTokens} in / ${result.usage.outputTokens} out, ~$${result.usage.estCostUsd.toFixed(4)}`);
+      console.log('  Risk rating and recommendation intentionally absent: human owns judgment.');
+    } catch (error) {
+      console.error('Error drafting narrative:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+// ============================================================================
 // WORKBOOK COMMAND - Generate the lender package workbook
 // ============================================================================
 program
@@ -674,6 +720,48 @@ function applyExtractedValues(
         rationale: `Extracted from broker materials - verify independently`,
       });
     }
+  }
+}
+
+/**
+ * LLM augmentation: runs only when deterministic extraction came up short
+ * (early-exit lever). Cheapest routed model, JSON-schema output, same sanity
+ * ranges. Cost is audit-logged per call.
+ */
+async function maybeLlmAugment(
+  deal: ReturnType<typeof loadDeal>,
+  extractedValues: Record<string, { value: number | string; confidence: number; rawText: string }>,
+  rawText: string,
+  sourceId: string
+): Promise<void> {
+  const found = Object.keys(extractedValues).length;
+  if (found >= 6 || !llmAvailable()) return;
+  try {
+    console.log(`  Deterministic extraction thin (${found} fields) - running LLM pass (routed: extraction tier)...`);
+    const out = await extractWithLlm(rawText, sourceId, extractedValues);
+    if (!deal.extracted.notes) deal.extracted.notes = [];
+    deal.extracted.notes.push(...out.notes);
+    applyExtractedValues(deal, out.values, sourceId);
+    applyHotelMetrics(deal, out.values, sourceId);
+    deal.auditLog.push({
+      timestamp: new Date().toISOString(),
+      action: 'LLM_EXTRACTION',
+      details: {
+        sourceId,
+        model: out.usage.model,
+        fieldsAdded: out.merged,
+        inputTokens: out.usage.inputTokens,
+        outputTokens: out.usage.outputTokens,
+        estCostUsd: +out.usage.estCostUsd.toFixed(5),
+        attempts: out.usage.attempts,
+      },
+    });
+    console.log(`  ✓ LLM added ${out.merged} fields (${out.usage.model}, ${out.usage.inputTokens} in / ${out.usage.outputTokens} out, ~$${out.usage.estCostUsd.toFixed(4)})`);
+    for (const n of out.notes) {
+      console.log(`    + ${n.field}: ${n.extractedValue} (confidence: ${n.confidence.toFixed(2)})`);
+    }
+  } catch (e) {
+    console.warn(`  LLM pass failed (kept deterministic results): ${e instanceof Error ? e.message : e}`);
   }
 }
 

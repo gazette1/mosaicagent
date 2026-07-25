@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mosaic Deal Intake</title>
+<style>
+  :root { color-scheme: light dark; --acc: #1a5c9e; --ok: #2e7d32; --warn: #b26a00; --bad: #c62828; --line: #8884; }
+  body { font-family: system-ui, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.35rem; margin-bottom: .2rem; } .sub { color: #888; font-size: .85rem; margin-bottom: 1.4rem; }
+  .row { display: flex; gap: .8rem; flex-wrap: wrap; margin-bottom: .9rem; }
+  label { font-size: .8rem; color: #888; display: block; margin-bottom: .2rem; }
+  input[type=text], select { padding: .45rem .6rem; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; min-width: 180px; }
+  #drop { border: 2px dashed var(--line); border-radius: 10px; padding: 2.2rem; text-align: center; color: #888; cursor: pointer; transition: border-color .15s; }
+  #drop.hover { border-color: var(--acc); color: var(--acc); }
+  #filelist { margin: .8rem 0; font-size: .85rem; } #filelist li { margin: .15rem 0; }
+  button { background: var(--acc); color: #fff; border: 0; border-radius: 6px; padding: .6rem 1.4rem; font-size: .95rem; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .chk { font-size: .85rem; display: flex; align-items: center; gap: .4rem; }
+  #status { margin: 1rem 0; font-size: .9rem; color: #888; }
+  .badge { display: inline-block; padding: .25rem .8rem; border-radius: 999px; font-weight: 700; color: #fff; }
+  .CHASE { background: var(--ok); } .STRUCTURE { background: var(--warn); } .DELEGATE { background: var(--warn); } .KILL { background: var(--bad); }
+  table { border-collapse: collapse; width: 100%; margin: .6rem 0 1rem; font-size: .88rem; }
+  th, td { text-align: left; padding: .3rem .55rem; border-bottom: 1px solid var(--line); }
+  .steps li { font-size: .85rem; } .ok { color: var(--ok); } .fail { color: var(--bad); }
+  .dl { display: inline-block; margin: .4rem .6rem 0 0; }
+  #result { display: none; }
+  .conf { color: #888; font-size: .8rem; }
+</style>
+</head>
+<body>
+<h1>Mosaic Deal Intake</h1>
+<div class="sub">Drop whatever the developer sent. The pipeline extracts, screens against doctrine, and builds the lender workbook. Numbers are never invented; gaps are named.</div>
+
+<div class="row">
+  <div><label>Deal name</label><input type="text" id="name" placeholder="Oceanfront Hotel Acquisition"></div>
+  <div><label>Asset type</label>
+    <select id="type">
+      <option value="hotel">hotel</option>
+      <option value="industrial">industrial</option>
+      <option value="retail">retail</option>
+      <option value="multifamily">multifamily</option>
+      <option value="other" selected>other</option>
+    </select>
+  </div>
+  <div><label>Location</label><input type="text" id="location" placeholder="City, ST"></div>
+</div>
+
+<div id="drop">Drop deal documents here or click to browse<br><span style="font-size:.75rem">PDF, XLSX, CSV, MD, TXT (DOCX pending)</span></div>
+<input type="file" id="picker" multiple style="display:none">
+<ul id="filelist"></ul>
+
+<div class="row" style="align-items:center">
+  <button id="go" disabled>Run the pipeline</button>
+  <label class="chk"><input type="checkbox" id="narrative"> draft narrative (LLM)</label>
+</div>
+
+<div id="status"></div>
+
+<div id="result">
+  <h2 style="font-size:1.1rem">Result <span id="verdict" class="badge"></span> <span id="risk" class="conf"></span></h2>
+  <div id="cost" class="conf"></div>
+  <h3 style="font-size:.95rem">Key metrics</h3>
+  <table id="metrics"></table>
+  <h3 style="font-size:.95rem">Extracted fields</h3>
+  <table id="fields"></table>
+  <h3 style="font-size:.95rem">Pipeline steps</h3>
+  <ul class="steps" id="steps"></ul>
+  <a id="wb" class="dl"><button>Download workbook (XLSX)</button></a>
+  <a id="nar" class="dl" style="display:none" target="_blank"><button>View narrative draft</button></a>
+</div>
+
+<script>
+  const drop = document.getElementById('drop');
+  const picker = document.getElementById('picker');
+  const go = document.getElementById('go');
+  let files = [];
+
+  function renderList() {
+    document.getElementById('filelist').innerHTML = files.map(f => `<li>${f.name} (${(f.size / 1024).toFixed(0)} KB)</li>`).join('');
+    go.disabled = files.length === 0;
+  }
+  function addFiles(list) { files = files.concat([...list]).slice(0, 8); renderList(); }
+
+  drop.addEventListener('click', () => picker.click());
+  picker.addEventListener('change', () => addFiles(picker.files));
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('hover'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('hover'));
+  drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('hover'); addFiles(e.dataTransfer.files); });
+
+  function b64(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result.split(',')[1]);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+  }
+
+  go.addEventListener('click', async () => {
+    go.disabled = true;
+    const status = document.getElementById('status');
+    status.textContent = 'Encoding files...';
+    const payload = {
+      name: document.getElementById('name').value || 'Untitled Deal',
+      type: document.getElementById('type').value,
+      location: document.getElementById('location').value,
+      narrative: document.getElementById('narrative').checked,
+      files: await Promise.all(files.map(async f => ({ name: f.name, b64: await b64(f) }))),
+    };
+    status.textContent = 'Running pipeline (extraction, screen, workbook' + (payload.narrative ? ', narrative' : '') + ')...';
+    try {
+      const res = await fetch('/api/deal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+      status.textContent = '';
+      const v = document.getElementById('verdict');
+      v.textContent = j.verdict || 'n/a';
+      v.className = 'badge ' + (j.verdict || '');
+      document.getElementById('risk').textContent = j.riskScore ? `risk ${j.riskScore}/5, confidence ${Math.round((j.confidence || 0) * 100)}%` + (j.killFlags.length ? ` | flags: ${j.killFlags.join(', ')}` : '') : '';
+      document.getElementById('cost').textContent = j.estLlmCostUsd ? `Estimated LLM spend this run: $${j.estLlmCostUsd}` : 'LLM spend this run: $0 (fully deterministic)';
+      document.getElementById('metrics').innerHTML = '<tr><th>Metric</th><th>Value</th><th>Confidence</th></tr>' +
+        Object.values(j.metrics).map(m => {
+          let val = m.value;
+          if (typeof val === 'number') val = m.unit === '%' ? val.toFixed(2) + '%' : m.unit === 'x' ? val.toFixed(2) + 'x' : '$' + Math.round(val).toLocaleString();
+          return `<tr><td>${m.name}</td><td>${val}</td><td class="conf">${(m.confidence ?? 0).toFixed(2)}</td></tr>`;
+        }).join('');
+      document.getElementById('fields').innerHTML = '<tr><th>Field</th><th>Value</th><th>Confidence</th></tr>' +
+        j.extracted.map(f => `<tr><td>${f.field}</td><td>${String(f.value).substring(0, 60)}</td><td class="conf">${f.confidence.toFixed(2)}</td></tr>`).join('');
+      document.getElementById('steps').innerHTML = j.steps.map(s => `<li class="${s.ok ? 'ok' : 'fail'}">${s.ok ? 'OK' : 'FAIL'} - ${s.step}${s.detail ? ' (' + s.detail + ')' : ''}</li>`).join('');
+      document.getElementById('wb').href = j.workbookUrl;
+      const nar = document.getElementById('nar');
+      if (j.narrativeUrl) { nar.style.display = 'inline-block'; nar.href = j.narrativeUrl; }
+      document.getElementById('result').style.display = 'block';
+    } catch (e) {
+      status.textContent = 'Failed: ' + e.message;
+    }
+    go.disabled = false;
+  });
+</script>
+</body>
+</html>
