@@ -16,6 +16,7 @@ import { passesSanity } from './text-parser';
 const EXTRACTION_FIELDS = [
   'askingPrice', 'noi', 'capRate', 'occupancy', 'adr', 'revpar', 'keys',
   'totalSF', 'totalUnits', 'yearBuilt', 'address', 'cityState', 'loanRequest',
+  'capexTotal',
 ] as const;
 
 const SCHEMA = {
@@ -41,6 +42,7 @@ Rules:
 - Only report values explicitly present in the text. Never estimate or infer.
 - If a field is not in the text, return null for it.
 - askingPrice is the purchase/asking price, NOT a loan amount. loanRequest is the debt being requested.
+- capexTotal is the total renovation, PIP, or capital improvement budget.
 - occupancy as a decimal (0.52 for 52%). capRate as a decimal (0.0717 for 7.17%).
 - Dollar amounts as plain numbers (18400000 for $18.4MM).
 - quote is a short verbatim snippet (under 80 chars) proving the value.

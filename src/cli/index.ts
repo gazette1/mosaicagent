@@ -742,6 +742,19 @@ function applyExtractedValues(
     }
   }
   
+  // Capital budget: a PIP or renovation budget in the room means capex IS
+  // priced, which is what the CapEx kill criterion tests against
+  if (extractedValues['capexTotal'] && !deal.assumptions.capexTotal) {
+    const capex = extractedValues['capexTotal'];
+    if (typeof capex.value === 'number') {
+      deal.assumptions.capexTotal = tracked(capex.value, capex.confidence, {
+        sourceId,
+        unit: 'USD',
+        rationale: `Renovation / PIP budget: "${capex.rawText.substring(0, 60)}"`,
+      });
+    }
+  }
+
   // Apply cap rate as an assumption if extracted
   if (extractedValues['capRate'] && !deal.assumptions.entryCap) {
     const cap = extractedValues['capRate'];

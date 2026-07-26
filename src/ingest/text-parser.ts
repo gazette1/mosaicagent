@@ -90,6 +90,18 @@ const EXTRACTION_PATTERNS: ExtractionPattern[] = [
     valueType: 'percent',
     confidence: 0.7,
   },
+  // Capital budget: PIP / renovation. Populates assumptions.capexTotal, which
+  // clears the "CapEx cannot be priced" kill flag when a budget is in the room.
+  {
+    field: 'capexTotal',
+    patterns: [
+      /(?:total\s+)?(?:renovation|pip)(?:\s*(?:and|\/|&)\s*pip)?\s*budget[\s:]*\$?([\d,]+(?:\.\d+)?)\s*(?:mm?|million)?/i,
+      /(?:renovation|pip|capital\s+improvement)[^\n$]{0,30}\$?([\d,]+(?:\.\d+)?)\s*(?:mm|million)/i,
+      /total\s+pip[\s:]*\$?([\d,]+(?:\.\d+)?)/i,
+    ],
+    valueType: 'currency',
+    confidence: 0.75,
+  },
   // Hotel: key count
   {
     field: 'keys',
@@ -212,6 +224,7 @@ const SANITY_RANGES: Record<string, [number, number]> = {
   yearBuilt: [1850, 2035],
   rentPerSF: [0.25, 500],
   loanRequest: [250_000, 5_000_000_000],
+  capexTotal: [10_000, 2_000_000_000],
 };
 
 export function passesSanity(field: string, value: number | string): boolean {
