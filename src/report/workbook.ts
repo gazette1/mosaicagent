@@ -77,6 +77,7 @@ export async function buildDealWorkbook(deal: Deal, outDir: string): Promise<str
   addInput('ltv', deal.assumptions.ltv, DEFAULT_STRESSES.conservativeLtv);
   addInput('exitCapSpread', undefined, DEFAULT_STRESSES.exitCapSpread);
   addInput('noiHaircut', deal.assumptions.noiHaircut, DEFAULT_STRESSES.noiHaircut);
+  addInput('exitCapBase', deal.assumptions.exitCap, assetDefaults.defaultCaps.exit);
   addInput('loanAmount', deal.assumptions.capexTotal ? undefined : undefined); // placeholder ordering
   inp.getColumn(5).numFmt = '0.00';
 
@@ -145,8 +146,54 @@ export async function buildDealWorkbook(deal: Deal, outDir: string): Promise<str
   dt.getCell('B17').numFmt = X;
 
   // ==========================================================================
-  // Sensitivity: DSCR, rate deltas x NOI deltas
+  // Scenarios: A (as presented) vs B (Mosaic adjusted) — Schema v2.0.
+  // The agent assembles; the analyst moves the levers and makes the call.
   // ==========================================================================
+  const LEVER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3A3000' } };
+  const sc = wb.addWorksheet('Scenarios');
+  sc.columns = [{ width: 30 }, { width: 18 }, { width: 18 }, { width: 52 }];
+  sc.addRow(['', 'A: As Presented', 'B: Mosaic Adjusted', 'Note']).font = { bold: true };
+  sc.addRow(['NOI', { formula: noiAddr }, { formula: 'B2*(1-B3_HAIRCUT)'.replace('B3_HAIRCUT', refs['noiHaircut'].addr) }, 'B = A x (1 - haircut lever). Haircut lives on Inputs']);
+  sc.addRow(['Debt Service (stressed IO)', { formula: 'Debt!B10' }, { formula: 'Debt!B10' }, 'Same facility both scenarios']);
+  sc.addRow(['DSCR', { formula: 'IF(B3=0,"n/a",B2/B3)' }, { formula: 'IF(C3=0,"n/a",C2/C3)' }, '= NOI / debt service']);
+  sc.addRow(['Debt Yield', { formula: 'IF(Debt!B9=0,"n/a",B2/Debt!B9)' }, { formula: 'IF(Debt!B9=0,"n/a",C2/Debt!B9)' }, '= NOI / loan']);
+  sc.addRow(['Read', { formula: 'IF(B4<1.15,"FAILS 1.15x floor",IF(B4<1.25,"THIN","CLEARS"))' }, { formula: 'IF(C4<1.15,"FAILS 1.15x floor",IF(C4<1.25,"THIN","CLEARS"))' }, 'Doctrine floor 1.15x; covenant convention 1.25x']);
+  sc.addRow([]);
+  sc.addRow(['The Read row is a screen, not a decision. The credit call stays with the analyst.', '', '', '']);
+  ['B2', 'C2', 'B3', 'C3'].forEach(c => (sc.getCell(c).numFmt = MONEY));
+  ['B4', 'C4'].forEach(c => (sc.getCell(c).numFmt = X));
+  ['B5', 'C5'].forEach(c => (sc.getCell(c).numFmt = PCT));
+
+  // ==========================================================================
+  // Macro Scenarios: named events, lever cells the analyst edits directly
+  // ==========================================================================
+  const mc = wb.addWorksheet('Macro Scenarios');
+  mc.columns = [{ width: 26 }, { width: 14 }, { width: 12 }, { width: 14 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 26 }];
+  mc.addRow(['Scenario', 'Rate D (bps)', 'NOI D (%)', 'Exit Cap D (bps)', 'DSCR', 'Debt Yield', 'Exit LTV', 'Read']).font = { bold: true };
+  const MACROS: [string, number, number, number][] = [
+    ['Base (stressed)', 0, 0, 0],
+    ['Rate shock +200', 200, 0, 0],
+    ['Recession', 50, -15, 50],
+    ['Stagflation', 150, -10, 75],
+    ['Refi market freeze', 100, 0, 150],
+  ];
+  MACROS.forEach((m, i) => {
+    const r = i + 2;
+    mc.addRow([
+      m[0], m[1], m[2], m[3],
+      { formula: `IF(Debt!$B$9=0,"n/a",('Scenarios'!$C$2*(1+C${r}/100))/(Debt!$B$9*(Debt!$B$6+B${r}/10000)))` },
+      { formula: `IF(Debt!$B$9=0,"n/a",('Scenarios'!$C$2*(1+C${r}/100))/Debt!$B$9)` },
+      { formula: `IF(('Scenarios'!$C$2*(1+C${r}/100))=0,"n/a",Debt!$B$9/(('Scenarios'!$C$2*(1+C${r}/100))/(${refs['exitCapBase'].addr}+D${r}/10000)))` },
+      { formula: `IF(E${r}<1.15,"FAILS floor",IF(E${r}<1.25,"THIN","OK"))` },
+    ]);
+    // Delta cells are levers: analyst-editable, marked
+    ['B', 'C', 'D'].forEach(c => (mc.getCell(`${c}${r}`).fill = LEVER_FILL));
+    mc.getCell(`E${r}`).numFmt = X;
+    mc.getCell(`F${r}`).numFmt = PCT;
+    mc.getCell(`G${r}`).numFmt = PCT;
+  });
+  mc.addRow([]);
+  mc.addRow(['Shaded cells are levers: edit the deltas and every formula recomputes. Base NOI is Scenario B (Mosaic adjusted).', '', '', '', '', '', '', '']);
   const sn = wb.addWorksheet('Sensitivity');
   sn.columns = [{ width: 24 }, { width: 14 }, { width: 14 }, { width: 14 }];
   sn.addRow(['DSCR', 'Rate -100bps', 'Rate +0', 'Rate +100bps']).font = { bold: true };
@@ -189,7 +236,9 @@ export async function buildDealWorkbook(deal: Deal, outDir: string): Promise<str
   inp.orderNo = 1;
   pf.orderNo = 2;
   dt.orderNo = 3;
-  sn.orderNo = 4;
+  sc.orderNo = 4;
+  mc.orderNo = 5;
+  sn.orderNo = 6;
 
   // ==========================================================================
   // Audit
