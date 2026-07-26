@@ -144,6 +144,13 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'GET' && req.url.startsWith('/api/narrative/')) {
     const dealId = req.url.split('/').pop().replace(/[^a-z0-9-]/g, '');
+    // Styled HTML preferred; markdown fallback for older deals
+    const html = path.join(REPO, 'deals', dealId, 'outputs', 'narrative.html');
+    if (fs.existsSync(html)) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(fs.readFileSync(html));
+      return;
+    }
     const p = path.join(REPO, 'deals', dealId, 'outputs', 'narrative.md');
     if (!fs.existsSync(p)) return json(res, 404, { error: 'not found' });
     res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8' });

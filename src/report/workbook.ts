@@ -25,6 +25,75 @@ const MONEY = '#,##0';
 const PCT = '0.00%';
 const X = '0.00"x"';
 
+// ============================================================================
+// Style system (Mosaic brand): navy header bands, boxed tables, amber lever
+// cells, conditional color on DSCR/Read cells so the workbook reacts when the
+// analyst moves a lever.
+// ============================================================================
+const NAVY = 'FF1A5C9E';
+const NAVY_DARK = 'FF123F6D';
+const GOOD = 'FF2E7D32';
+const WARN = 'FFB26A00';
+const BAD = 'FFC62828';
+const LEVER = 'FFFFF2CC'; // light amber: analyst-editable or defaulted value
+const ZEBRA = 'FFF3F6FA';
+const WHITE = 'FFFFFFFF';
+const THIN = { style: 'thin' as const, color: { argb: 'FFB9C4D0' } };
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Ws = any;
+
+function fillCell(cell: { fill?: unknown }, argb: string): void {
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb } };
+}
+
+/** Navy band with white bold text for a table header row. */
+function bandRow(ws: Ws, rowNumber: number, cols: number): void {
+  for (let c = 1; c <= cols; c++) {
+    const cell = ws.getRow(rowNumber).getCell(c);
+    fillCell(cell, NAVY);
+    cell.font = { bold: true, color: { argb: WHITE } };
+    cell.border = { top: THIN, bottom: THIN, left: THIN, right: THIN };
+  }
+}
+
+/** Thin box borders + zebra striping across a table body. */
+function boxTable(ws: Ws, fromRow: number, toRow: number, cols: number, zebra = true): void {
+  for (let r = fromRow; r <= toRow; r++) {
+    for (let c = 1; c <= cols; c++) {
+      const cell = ws.getRow(r).getCell(c);
+      cell.border = { top: THIN, bottom: THIN, left: THIN, right: THIN };
+      if (zebra && r % 2 === 0 && !cell.fill) fillCell(cell, ZEBRA);
+    }
+  }
+}
+
+/** Three-tier DSCR conditional color: red < 1.15, amber < 1.25, green above. */
+function dscrConditional(ws: Ws, ref: string): void {
+  ws.addConditionalFormatting({
+    ref,
+    rules: [
+      { type: 'cellIs', operator: 'lessThan', formulae: ['1.15'], priority: 1,
+        style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: BAD } }, font: { color: { argb: WHITE }, bold: true } } },
+      { type: 'cellIs', operator: 'between', formulae: ['1.15', '1.25'], priority: 2,
+        style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: WARN } }, font: { color: { argb: WHITE }, bold: true } } },
+      { type: 'cellIs', operator: 'greaterThanOrEqual', formulae: ['1.25'], priority: 3,
+        style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: GOOD } }, font: { color: { argb: WHITE }, bold: true } } },
+    ],
+  });
+}
+
+/** Color Read cells by their text (FAILS / THIN / CLEARS or OK). */
+function readConditional(ws: Ws, ref: string): void {
+  const rule = (text: string, argb: string, priority: number) => ({
+    type: 'containsText' as const, operator: 'containsText' as const, text, priority,
+    style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb } }, font: { color: { argb: WHITE }, bold: true } },
+  });
+  ws.addConditionalFormatting({ ref, rules: [rule('FAILS', BAD, 1), rule('THIN', WARN, 2), rule('CLEARS', GOOD, 3), rule('OK', GOOD, 4)] });
+}
+
+const VERDICT_COLORS: Record<string, string> = { KILL: BAD, CHASE: GOOD, STRUCTURE: WARN, DELEGATE: WARN };
+
 interface InputRef {
   addr: string; // e.g. Inputs!$B$4
   row: number;
@@ -53,6 +122,10 @@ export async function buildDealWorkbook(deal: Deal, outDir: string): Promise<str
       tv?.confidence ?? (fallback !== undefined ? 0.4 : ''),
       tv?.formula ?? tv?.rationale ?? (tv?.isProxy ? `PROXY: ${tv.proxyMethod ?? ''}` : ''),
     ]);
+    // Defaulted values are lever-shaded: visible gaps the analyst should confirm
+    if (!tv && fallback !== undefined) {
+      for (let c = 1; c <= 6; c++) fillCell(row.getCell(c), LEVER);
+    }
     const ref = { addr: `Inputs!$B$${row.number}`, row: row.number };
     refs[field] = ref;
     return ref;
@@ -149,7 +222,6 @@ export async function buildDealWorkbook(deal: Deal, outDir: string): Promise<str
   // Scenarios: A (as presented) vs B (Mosaic adjusted) — Schema v2.0.
   // The agent assembles; the analyst moves the levers and makes the call.
   // ==========================================================================
-  const LEVER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3A3000' } };
   const sc = wb.addWorksheet('Scenarios');
   sc.columns = [{ width: 30 }, { width: 18 }, { width: 18 }, { width: 52 }];
   sc.addRow(['', 'A: As Presented', 'B: Mosaic Adjusted', 'Note']).font = { bold: true };
@@ -187,7 +259,7 @@ export async function buildDealWorkbook(deal: Deal, outDir: string): Promise<str
       { formula: `IF(E${r}<1.15,"FAILS floor",IF(E${r}<1.25,"THIN","OK"))` },
     ]);
     // Delta cells are levers: analyst-editable, marked
-    ['B', 'C', 'D'].forEach(c => (mc.getCell(`${c}${r}`).fill = LEVER_FILL));
+    ['B', 'C', 'D'].forEach(c => fillCell(mc.getCell(`${c}${r}`), LEVER));
     mc.getCell(`E${r}`).numFmt = X;
     mc.getCell(`F${r}`).numFmt = PCT;
     mc.getCell(`G${r}`).numFmt = PCT;
@@ -241,6 +313,51 @@ export async function buildDealWorkbook(deal: Deal, outDir: string): Promise<str
   sn.orderNo = 6;
 
   // ==========================================================================
+  // Visual pass: header bands, boxed tables, conditional color, tab colors
+  // ==========================================================================
+  const freeze = (ws: Ws) => (ws.views = [{ state: 'frozen', ySplit: 1 }]);
+  const tab = (ws: Ws, argb: string) => (ws.properties.tabColor = { argb });
+
+  tab(sum, NAVY_DARK); tab(inp, 'FF8A8A8A'); tab(pf, NAVY); tab(dt, NAVY_DARK);
+  tab(sc, GOOD); tab(mc, WARN); tab(sn, 'FF8A8A8A');
+
+  // Summary: title styling, banded metric header, verdict cell colored
+  sum.getCell('A1').font = { bold: true, size: 15, color: { argb: NAVY } };
+  sum.getCell('A2').font = { color: { argb: 'FF6B7A8C' } };
+  bandRow(sum, 4, 3);
+  boxTable(sum, 5, sum.rowCount, 3);
+  sum.eachRow((row: { getCell: (n: number) => { value: unknown; font?: unknown; fill?: unknown } }, rn: number) => {
+    const label = row.getCell(1).value;
+    if (label === 'Screen Verdict') {
+      const cell = sum.getRow(rn).getCell(2);
+      const color = VERDICT_COLORS[String(cell.value)] ?? WARN;
+      fillCell(cell, color);
+      cell.font = { bold: true, color: { argb: WHITE } };
+    }
+  });
+
+  // Inputs / Pro Forma / Debt: band + box + freeze
+  bandRow(inp, 1, 6); boxTable(inp, 2, inp.rowCount, 6, false); freeze(inp);
+  bandRow(pf, 1, isHotel ? 3 : 3); boxTable(pf, 2, isHotel ? 11 : 2, 3); freeze(pf);
+  bandRow(dt, 1, 3); boxTable(dt, 2, 17, 3); freeze(dt);
+  dscrConditional(dt, 'B12');
+  dscrConditional(dt, 'B17');
+
+  // Scenarios: band, box, reactive DSCR + Read colors
+  bandRow(sc, 1, 4); boxTable(sc, 2, 6, 4);
+  dscrConditional(sc, 'B4:C4');
+  readConditional(sc, 'B6:C6');
+
+  // Macro Scenarios: band, box (levers keep their amber), reactive colors
+  bandRow(mc, 1, 8); boxTable(mc, 2, 6, 8, false);
+  dscrConditional(mc, 'E2:E6');
+  readConditional(mc, 'H2:H6');
+
+  // Sensitivity: band + box + reactive DSCR grid
+  bandRow(sn, 1, 4); boxTable(sn, 2, 4, 4, false);
+  dscrConditional(sn, 'B2:D4');
+
+  // ==========================================================================
   // Audit
   // ==========================================================================
   const au = wb.addWorksheet('Audit');
@@ -250,10 +367,15 @@ export async function buildDealWorkbook(deal: Deal, outDir: string): Promise<str
     au.addRow([s.id, s.kind, s.filename ?? '']);
   }
   au.addRow([]);
-  au.addRow(['Audit Log', '', '']).font = { bold: true };
+  const auditHeader = au.addRow(['Audit Log', '', '']);
+  auditHeader.font = { bold: true };
   for (const entry of deal.auditLog.slice(-50)) {
     au.addRow([entry.timestamp, entry.action, JSON.stringify(entry.details).substring(0, 200)]);
   }
+  tab(au, 'FF8A8A8A');
+  bandRow(au, 1, 3);
+  bandRow(au, auditHeader.number, 3);
+  boxTable(au, 2, au.rowCount, 3, false);
 
   const outPath = path.join(outDir, 'package.xlsx');
   await wb.xlsx.writeFile(outPath);

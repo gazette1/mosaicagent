@@ -570,6 +570,8 @@ program
       console.log('Drafting narrative (routed: narrative tier)...');
       const result = await generateNarrative(deal);
       const outPath = writeOutput(deal.dealId, 'narrative.md', result.markdown);
+      const htmlPath = writeOutput(deal.dealId, 'narrative.html', result.html);
+      console.log(`✓ Styled HTML: ${htmlPath}`);
       deal.auditLog.push({
         timestamp: new Date().toISOString(),
         action: 'NARRATIVE_DRAFTED',
