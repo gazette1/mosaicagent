@@ -45,6 +45,62 @@ function json(res, code, obj) {
   res.end(JSON.stringify(obj));
 }
 
+function readJson(req, res, maxBytes, cb) {
+  let body = '';
+  req.setEncoding('utf-8');
+  req.on('data', d => {
+    body += d;
+    if (body.length > maxBytes) req.destroy();
+  });
+  req.on('end', () => {
+    try { cb(JSON.parse(body)); }
+    catch (e) { json(res, 400, { error: 'bad json: ' + (e.message || '').substring(0, 120) }); }
+  });
+}
+
+/** Distilled view of a deal for the back-office numbers board. */
+function dealSnapshot(dealId) {
+  const dealPath = path.join(REPO, 'deals', dealId, 'deal.json');
+  if (!fs.existsSync(dealPath)) return null;
+  const deal = JSON.parse(fs.readFileSync(dealPath, 'utf-8'));
+  const screenPath = path.join(REPO, 'deals', dealId, 'outputs', 'screen.json');
+  const screen = fs.existsSync(screenPath) ? JSON.parse(fs.readFileSync(screenPath, 'utf-8')) : null;
+  const sourceNames = Object.fromEntries((deal.sources || []).map(s => [s.id, s.filename || s.kind]));
+  const llmCost = (deal.auditLog || [])
+    .filter(e => ['LLM_EXTRACTION', 'OCR_EXTRACTION', 'NARRATIVE_DRAFTED'].includes(e.action))
+    .reduce((s, e) => s + (e.details?.estCostUsd || 0), 0);
+  return {
+    dealId,
+    name: deal.name,
+    assetType: deal.assetType,
+    price: deal.askingPrice?.value ?? null,
+    noi: deal.extracted?.t12?.noi?.value ?? null,
+    noiIsProxy: Boolean(deal.extracted?.t12?.noi?.isProxy),
+    hotel: deal.extracted?.hotel ? {
+      keys: deal.extracted.hotel.keys?.value ?? null,
+      adr: deal.extracted.hotel.adr?.value ?? null,
+      occupancy: deal.extracted.hotel.occupancy?.value ?? null,
+      revpar: deal.extracted.hotel.revpar?.value ?? null,
+    } : null,
+    fields: (deal.extracted?.notes || []).map(n => ({
+      field: n.field,
+      value: n.extractedValue,
+      confidence: n.confidence,
+      source: sourceNames[n.sourceId] || n.sourceId,
+      quote: (n.rawText || '').substring(0, 100),
+    })),
+    estLlmCostUsd: +llmCost.toFixed(4),
+    screen: screen ? {
+      verdict: screen.verdict,
+      riskScore: screen.riskScore,
+      confidence: screen.confidenceSummary?.overall ?? null,
+      killFlags: (screen.killFlags || []).filter(f => f.triggered).map(f => f.criterion),
+      metrics: Object.fromEntries(Object.entries(screen.keyMetrics || {}).map(([k, m]) =>
+        [k, { name: m.name, value: m.value?.value, unit: m.value?.unit, confidence: m.value?.confidence }])),
+    } : null,
+  };
+}
+
 const server = http.createServer((req, res) => {
   // CORS: the intake UI is also served from russh.work (static portfolio);
   // the passcode, not the origin, is the gate
@@ -60,6 +116,13 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && (req.url === '/' || req.url.startsWith('/?'))) {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(fs.readFileSync(UI));
+    return;
+  }
+
+  // Back office: deal-room intake for demos and the Loom recording
+  if (req.method === 'GET' && (req.url === '/back' || req.url === '/back/' || req.url.startsWith('/back?'))) {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(fs.readFileSync(path.join(__dirname, 'back-ui.html')));
     return;
   }
 
@@ -85,6 +148,76 @@ const server = http.createServer((req, res) => {
     if (!fs.existsSync(p)) return json(res, 404, { error: 'not found' });
     res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8' });
     res.end(fs.readFileSync(p));
+    return;
+  }
+
+  // ==========================================================================
+  // Back-office granular endpoints: one deal, files ingested one at a time so
+  // the numbers board updates live while a deal room is dragged in.
+  // ==========================================================================
+
+  if (req.method === 'POST' && req.url === '/api/back/deal') {
+    readJson(req, res, 1024 * 1024, ({ name, type, location }) => {
+      try {
+        const out = run(['new', '--name', String(name || 'Untitled').substring(0, 80), '--type', type || 'other', '--location', String(location || 'unknown').substring(0, 80)]);
+        const dealId = (out.match(/Created deal: (\S+)/) || [])[1];
+        json(res, 200, { dealId, snapshot: dealSnapshot(dealId) });
+      } catch (e) { json(res, 500, { error: (e.message || 'failed').substring(0, 200) }); }
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/back/ingest') {
+    readJson(req, res, 200 * 1024 * 1024, ({ dealId, file }) => {
+      try {
+        if (!dealId || !file?.name || !file?.b64) return json(res, 400, { error: 'dealId and file{name,b64} required' });
+        const kind = kindFor(file.name);
+        if (!kind) return json(res, 200, { skipped: true, reason: 'unsupported type (docx pending)', snapshot: dealSnapshot(dealId) });
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mosaic-back-'));
+        const safe = path.join(tmp, path.basename(file.name).replace(/[^\w.\- ]/g, '_'));
+        fs.writeFileSync(safe, Buffer.from(file.b64, 'base64'));
+        const out = run(['ingest', '--deal', dealId.replace(/[^a-z0-9-]/g, ''), '--file', safe, '--kind', kind]);
+        json(res, 200, {
+          kind,
+          fields: Number((out.match(/Extracted (\d+)/) || [])[1] ?? 0),
+          llmPass: out.includes('LLM added'),
+          ocrPass: out.includes('OCR added'),
+          snapshot: dealSnapshot(dealId),
+        });
+      } catch (e) { json(res, 500, { error: (e.message || 'failed').substring(0, 200), snapshot: dealId ? dealSnapshot(dealId) : null }); }
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/back/screen') {
+    readJson(req, res, 1024 * 1024, ({ dealId }) => {
+      try {
+        run(['screen', '--deal', dealId.replace(/[^a-z0-9-]/g, '')]);
+        json(res, 200, { snapshot: dealSnapshot(dealId) });
+      } catch (e) { json(res, 500, { error: (e.message || 'failed').substring(0, 200), snapshot: dealSnapshot(dealId) }); }
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/back/workbook') {
+    readJson(req, res, 1024 * 1024, ({ dealId }) => {
+      try {
+        const clean = dealId.replace(/[^a-z0-9-]/g, '');
+        run(['workbook', '--deal', clean]);
+        json(res, 200, { workbookUrl: `/api/workbook/${clean}`, snapshot: dealSnapshot(dealId) });
+      } catch (e) { json(res, 500, { error: (e.message || 'failed').substring(0, 200) }); }
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/back/narrative') {
+    readJson(req, res, 1024 * 1024, ({ dealId }) => {
+      try {
+        const clean = dealId.replace(/[^a-z0-9-]/g, '');
+        run(['narrative', '--deal', clean]);
+        json(res, 200, { narrativeUrl: `/api/narrative/${clean}`, snapshot: dealSnapshot(dealId) });
+      } catch (e) { json(res, 500, { error: (e.message || 'failed').substring(0, 200) }); }
+    });
     return;
   }
 

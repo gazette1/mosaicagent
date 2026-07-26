@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mosaic Back Office — Deal Room Intake</title>
+<style>
+  :root { color-scheme: light dark; --acc: #1a5c9e; --ok: #2e7d32; --warn: #b26a00; --bad: #c62828; --line: #8884; }
+  body { font-family: system-ui, sans-serif; max-width: 1160px; margin: 1.6rem auto 4rem; padding: 0 1.2rem; }
+  h1 { font-size: 1.25rem; margin-bottom: .15rem; }
+  .sub { color: #888; font-size: .85rem; margin-bottom: 1.2rem; }
+  .row { display: flex; gap: .8rem; flex-wrap: wrap; align-items: flex-end; margin-bottom: 1rem; }
+  label { font-size: .75rem; color: #888; display: block; margin-bottom: .2rem; text-transform: uppercase; letter-spacing: .04em; }
+  input[type=text] { padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; min-width: 200px; }
+  select { padding: .5rem .6rem; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: #111; }
+  @media (prefers-color-scheme: dark) { select { background: #1e1e1e; color: #eee; } select option { background: #1e1e1e; color: #eee; } }
+  button { background: var(--acc); color: #fff; border: 0; border-radius: 6px; padding: .55rem 1.2rem; font-size: .9rem; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.alt { background: transparent; color: inherit; border: 1px solid var(--line); }
+  .cols { display: grid; grid-template-columns: 340px 1fr; gap: 1.6rem; align-items: start; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+  #drop { border: 2px dashed var(--line); border-radius: 10px; padding: 2rem 1rem; text-align: center; color: #888; cursor: pointer; }
+  #drop.hover { border-color: var(--acc); color: var(--acc); }
+  #drop.off { opacity: .4; pointer-events: none; }
+  .queue { margin-top: .8rem; font-size: .82rem; }
+  .queue li { margin: .3rem 0; list-style: none; }
+  .queue .st { display: inline-block; min-width: 74px; font-weight: 600; }
+  .st.wait { color: #888; } .st.run { color: var(--warn); } .st.done { color: var(--ok); } .st.err { color: var(--bad); } .st.skip { color: #888; }
+  h2 { font-size: .95rem; margin: 1.4rem 0 .5rem; text-transform: uppercase; letter-spacing: .05em; color: #888; }
+  table { border-collapse: collapse; width: 100%; font-size: .86rem; }
+  th, td { text-align: left; padding: .32rem .55rem; border-bottom: 1px solid var(--line); }
+  th { color: #888; font-weight: 500; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; }
+  td.v { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .badge { display: inline-block; padding: .22rem .8rem; border-radius: 999px; font-weight: 700; color: #fff; font-size: .85rem; }
+  .CHASE { background: var(--ok); } .STRUCTURE, .DELEGATE { background: var(--warn); } .KILL { background: var(--bad); }
+  .muted { color: #888; }
+  .flash { animation: flash 1s ease-out; }
+  @keyframes flash { 0% { background: color-mix(in srgb, var(--acc) 30%, transparent); } 100% { background: transparent; } }
+  .actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; }
+  #spend { font-size: .8rem; color: #888; margin-top: .6rem; }
+  .quote { color: #888; font-size: .76rem; }
+</style>
+</head>
+<body>
+<h1>Mosaic Back Office — Deal Room Intake</h1>
+<div class="sub">Open a deal room, drag the whole document set in. Files process one at a time; the numbers board updates as each lands. Nothing is invented: every value carries its source document and confidence.</div>
+
+<div class="row">
+  <div><label>Deal name</label><input type="text" id="name" placeholder="Oceanfront Hotel Bridge"></div>
+  <div><label>Asset type</label>
+    <select id="type">
+      <option value="hotel">Hotel</option>
+      <option value="industrial">Industrial</option>
+      <option value="retail">Retail</option>
+      <option value="multifamily">Multifamily</option>
+      <option value="lihtc">LIHTC (affordable)</option>
+      <option value="other" selected>Other</option>
+    </select>
+  </div>
+  <div><label>Location</label><input type="text" id="location" placeholder="City, ST"></div>
+  <button id="open">Open deal room</button>
+  <span id="dealTag" class="muted"></span>
+</div>
+
+<div class="cols">
+  <div>
+    <div id="drop" class="off">Drop the deal room here<br><span style="font-size:.75rem">PDF · XLSX · CSV · MD · TXT · PNG · JPG — as many as you have</span></div>
+    <ul class="queue" id="queue"></ul>
+    <div class="actions">
+      <button id="screenBtn" class="alt" disabled>Re-run screen</button>
+      <button id="wbBtn" class="alt" disabled>Workbook (XLSX)</button>
+      <button id="narBtn" class="alt" disabled>Draft narrative</button>
+    </div>
+    <div id="spend"></div>
+  </div>
+
+  <div>
+    <h2>Verdict</h2>
+    <div id="verdictRow"><span class="muted">Screens automatically once the drop finishes.</span></div>
+    <h2>Numbers</h2>
+    <table id="numbers"><tr><td class="muted">Waiting for documents.</td></tr></table>
+    <h2>Extracted fields <span id="fieldCount" class="muted"></span></h2>
+    <table id="fields"></table>
+  </div>
+</div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  let dealId = null, spend = 0, busy = false;
+  const queue = [];
+
+  const b64 = f => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(f); });
+  const api = (path, body) => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+  const money = v => '$' + Math.round(v).toLocaleString();
+
+  $('open').addEventListener('click', async () => {
+    $('open').disabled = true;
+    const j = await api('/api/back/deal', { name: $('name').value || 'Untitled Deal', type: $('type').value, location: $('location').value });
+    if (j.error) { alert(j.error); $('open').disabled = false; return; }
+    dealId = j.dealId;
+    $('dealTag').textContent = dealId;
+    $('drop').classList.remove('off');
+    renderSnapshot(j.snapshot);
+  });
+
+  $('drop').addEventListener('click', () => picker.click());
+  const picker = document.createElement('input'); picker.type = 'file'; picker.multiple = true;
+  picker.addEventListener('change', () => enqueue(picker.files));
+  $('drop').addEventListener('dragover', e => { e.preventDefault(); $('drop').classList.add('hover'); });
+  $('drop').addEventListener('dragleave', () => $('drop').classList.remove('hover'));
+  $('drop').addEventListener('drop', e => { e.preventDefault(); $('drop').classList.remove('hover'); enqueue(e.dataTransfer.files); });
+
+  function enqueue(list) {
+    for (const f of list) {
+      const li = document.createElement('li');
+      li.innerHTML = `<span class="st wait">queued</span>${f.name} <span class="muted">${(f.size/1024).toFixed(0)} KB</span>`;
+      $('queue').appendChild(li);
+      queue.push({ f, li });
+    }
+    pump();
+  }
+
+  async function pump() {
+    if (busy || !dealId) return;
+    const item = queue.find(q => !q.done);
+    if (!item) { await autoScreen(); return; }
+    busy = true;
+    const st = item.li.querySelector('.st');
+    st.textContent = 'ingesting'; st.className = 'st run';
+    try {
+      const j = await api('/api/back/ingest', { dealId, file: { name: item.f.name, b64: await b64(item.f) } });
+      if (j.error) { st.textContent = 'error'; st.className = 'st err'; item.li.title = j.error; }
+      else if (j.skipped) { st.textContent = 'skipped'; st.className = 'st skip'; item.li.title = j.reason; }
+      else {
+        const extra = j.ocrPass ? ' +OCR' : j.llmPass ? ' +LLM' : '';
+        st.textContent = `${j.kind}${extra}`; st.className = 'st done';
+      }
+      if (j.snapshot) renderSnapshot(j.snapshot);
+    } catch (e) { st.textContent = 'error'; st.className = 'st err'; item.li.title = e.message; }
+    item.done = true;
+    busy = false;
+    pump();
+  }
+
+  async function autoScreen() {
+    if (!dealId || !$('queue').children.length) return;
+    const j = await api('/api/back/screen', { dealId });
+    if (j.snapshot) renderSnapshot(j.snapshot);
+    $('screenBtn').disabled = $('wbBtn').disabled = $('narBtn').disabled = false;
+  }
+
+  $('screenBtn').addEventListener('click', autoScreen);
+  $('wbBtn').addEventListener('click', async () => {
+    $('wbBtn').disabled = true;
+    const j = await api('/api/back/workbook', { dealId });
+    $('wbBtn').disabled = false;
+    if (j.workbookUrl) window.location = j.workbookUrl;
+  });
+  $('narBtn').addEventListener('click', async () => {
+    $('narBtn').disabled = true; $('narBtn').textContent = 'Drafting...';
+    const j = await api('/api/back/narrative', { dealId });
+    $('narBtn').disabled = false; $('narBtn').textContent = 'Draft narrative';
+    if (j.snapshot) renderSnapshot(j.snapshot);
+    if (j.narrativeUrl) window.open(j.narrativeUrl, '_blank');
+  });
+
+  function renderSnapshot(s) {
+    if (!s) return;
+    spend = s.estLlmCostUsd || 0;
+    $('spend').textContent = spend ? `Model spend this deal: $${spend.toFixed(4)}` : 'Model spend this deal: $0 — deterministic so far';
+
+    // Numbers board
+    const rows = [];
+    if (s.price != null) rows.push(['Price / basis', money(s.price)]);
+    if (s.noi != null) rows.push(['NOI' + (s.noiIsProxy ? ' (proxy)' : ''), money(s.noi) + '/yr']);
+    if (s.hotel) {
+      if (s.hotel.keys != null) rows.push(['Keys', s.hotel.keys]);
+      if (s.hotel.adr != null) rows.push(['ADR', money(s.hotel.adr)]);
+      if (s.hotel.occupancy != null) rows.push(['Occupancy', (s.hotel.occupancy * 100).toFixed(1) + '%']);
+      if (s.hotel.revpar != null) rows.push(['RevPAR', money(s.hotel.revpar)]);
+    }
+    if (s.screen) {
+      for (const m of Object.values(s.screen.metrics)) {
+        if (typeof m.value !== 'number') continue;
+        const v = m.unit === '%' ? m.value.toFixed(2) + '%' : m.unit === 'x' ? m.value.toFixed(2) + 'x' : money(m.value);
+        rows.push([m.name, v, m.confidence]);
+      }
+    }
+    $('numbers').innerHTML = rows.length
+      ? '<tr><th>Metric</th><th>Value</th><th>Conf</th></tr>' + rows.map(r =>
+          `<tr class="flash"><td>${r[0]}</td><td class="v">${r[1]}</td><td class="muted">${r[2] != null ? Number(r[2]).toFixed(2) : ''}</td></tr>`).join('')
+      : '<tr><td class="muted">Nothing extracted yet.</td></tr>';
+
+    // Verdict
+    if (s.screen) {
+      $('verdictRow').innerHTML = `<span class="badge ${s.screen.verdict}">${s.screen.verdict}</span>
+        <span class="muted"> risk ${s.screen.riskScore}/5 · confidence ${Math.round((s.screen.confidence||0)*100)}%`
+        + (s.screen.killFlags.length ? ` · flags: ${s.screen.killFlags.join(', ')}` : '') + '</span>';
+    }
+
+    // Fields
+    $('fieldCount').textContent = s.fields.length ? `(${s.fields.length})` : '';
+    $('fields').innerHTML = s.fields.length
+      ? '<tr><th>Field</th><th>Value</th><th>Conf</th><th>Source</th><th>Evidence</th></tr>' + s.fields.map(f =>
+          `<tr><td>${f.field}</td><td class="v">${String(f.value).substring(0, 40)}</td><td class="muted">${f.confidence.toFixed(2)}</td><td class="muted">${f.source}</td><td class="quote">${f.quote.replace(/</g,'&lt;')}</td></tr>`).join('')
+      : '';
+  }
+</script>
+</body>
+</html>
