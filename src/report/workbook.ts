@@ -65,6 +65,15 @@ function boxTable(ws: Ws, fromRow: number, toRow: number, cols: number, zebra = 
   }
 }
 
+/** Wrap long-text columns so nothing renders cut off. */
+function wrapCol(ws: Ws, cols: number[], fromRow: number, toRow: number): void {
+  for (let r = fromRow; r <= toRow; r++) {
+    for (const c of cols) {
+      ws.getRow(r).getCell(c).alignment = { wrapText: true, vertical: 'top' };
+    }
+  }
+}
+
 function dscrConditional(ws: Ws, ref: string): void {
   ws.addConditionalFormatting({
     ref,
@@ -110,7 +119,7 @@ export async function buildDealWorkbook(deal: Deal, outDir: string, design?: Arc
   // ASSUMPTIONS: single source of truth. Cols: A label | B value | C source | D conf
   // ==========================================================================
   const as = wb.addWorksheet('Assumptions');
-  as.columns = [{ width: 32 }, { width: 16 }, { width: 26 }, { width: 8 }];
+  as.columns = [{ width: 32 }, { width: 16 }, { width: 46 }, { width: 8 }];
   const A: Record<string, number> = {}; // key -> row number
   const src = (tv?: TrackedNumber | null, fb = 'lever / default') => tv?.sourceId ?? fb;
   const cf = (tv?: TrackedNumber | null, fb = '') => (tv?.confidence !== undefined ? tv.confidence.toFixed(2) : fb);
@@ -209,6 +218,7 @@ export async function buildDealWorkbook(deal: Deal, outDir: string, design?: Arc
 
   for (const r of lever) fillCell(as.getRow(r).getCell(2), LEVER);
   boxTable(as, 4, as.rowCount, 4, false);
+  wrapCol(as, [1, 3], 4, as.rowCount);
 
   // ==========================================================================
   // PRO FORMA: 10 years
@@ -300,6 +310,7 @@ export async function buildDealWorkbook(deal: Deal, outDir: string, design?: Arc
   addS('payoff', 'Bridge Payoff (loan + reserve)', `'Debt Sizing'!B8`);
   addS('excess', 'Excess / (Gap) at Refi', `B${S['refi']}-B${S['payoff']}`);
   boxTable(st, 3, st.rowCount, 3, false);
+  wrapCol(st, [3], 3, st.rowCount);
 
   // ==========================================================================
   // DEBT SIZING
@@ -333,6 +344,7 @@ export async function buildDealWorkbook(deal: Deal, outDir: string, design?: Arc
   dz.getCell('B15').numFmt = X; dz.getCell('B16').numFmt = X;
   dscrConditional(dz, 'B15'); dscrConditional(dz, 'B16');
   boxTable(dz, 2, dz.rowCount, 3, false);
+  wrapCol(dz, [3], 2, dz.rowCount);
 
   // ==========================================================================
   // SOURCES & USES
@@ -354,6 +366,7 @@ export async function buildDealWorkbook(deal: Deal, outDir: string, design?: Arc
   su.addRow(['Balance Check (must be 0)', { formula: 'B12-B8' }, '']);            // B13
   ['B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B10', 'B11', 'B12', 'B13'].forEach(c => (su.getCell(c).numFmt = MONEY));
   boxTable(su, 2, su.rowCount, 3, false);
+  wrapCol(su, [3], 2, su.rowCount);
 
   // ==========================================================================
   // SENSITIVITY: DSCR (rate x NOI) and Value (cap x NOI)
@@ -401,9 +414,10 @@ export async function buildDealWorkbook(deal: Deal, outDir: string, design?: Arc
   ['B5', 'C5'].forEach(c => (sc.getCell(c).numFmt = PCT));
   dscrConditional(sc, 'B4:C4');
   boxTable(sc, 2, 6, 4);
+  wrapCol(sc, [1, 4], 2, 6);
 
   const mc = wb.addWorksheet('Macro Scenarios');
-  mc.columns = [{ width: 26 }, { width: 14 }, { width: 12 }, { width: 14 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 26 }];
+  mc.columns = [{ width: 26 }, { width: 14 }, { width: 12 }, { width: 14 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 48 }];
   const mch = mc.addRow(['Scenario', 'Rate D (bps)', 'NOI D (%)', 'Exit Cap D (bps)', 'DSCR', 'Debt Yield', 'Exit LTV', 'Read']);
   bandRow(mc, mch.number, 8);
   // Deal-specific scenarios from the K3 architect when present; generic set
@@ -436,7 +450,10 @@ export async function buildDealWorkbook(deal: Deal, outDir: string, design?: Arc
   if (design?.scenarios?.length) {
     mc.addRow([]);
     mc.addRow(['Scenarios designed by Kimi K3 from this deal\'s structure flags; deltas are levers.']);
-    design.scenarios.forEach((s, i) => mc.addRow([`${i + 2 <= mcLast ? '' : ''}${s.name}`, '', '', '', '', '', '', s.rationale.substring(0, 80)]));
+    design.scenarios.forEach(sd => {
+      const r = mc.addRow([sd.name, '', '', '', '', '', '', sd.rationale]);
+      wrapCol(mc, [1, 8], r.number, r.number);
+    });
   }
 
   // ==========================================================================
@@ -451,7 +468,7 @@ export async function buildDealWorkbook(deal: Deal, outDir: string, design?: Arc
     bandRow(ob, oh.number, 7);
     const firstDataRow = oh.number + 1;
     for (const o of design.obligations) {
-      const r = ob.addRow([o.label, ...o.annualAmounts, o.rationale.substring(0, 90)]);
+      const r = ob.addRow([o.label, ...o.annualAmounts, o.rationale]);
       for (let c = 2; c <= 6; c++) { r.getCell(c).numFmt = MONEY; fillCell(r.getCell(c), LEVER); }
     }
     const lastDataRow = ob.rowCount;
@@ -469,6 +486,7 @@ export async function buildDealWorkbook(deal: Deal, outDir: string, design?: Arc
       ],
     });
     boxTable(ob, oh.number + 1, ob.rowCount, 7, false);
+    wrapCol(ob, [1, 7], oh.number + 1, ob.rowCount);
   }
 
   // ==========================================================================
@@ -508,30 +526,43 @@ export async function buildDealWorkbook(deal: Deal, outDir: string, design?: Arc
   ex.addRow(['Amber cells', 'levers / defaults', 'analyst-editable or unverified inputs']);
   if (design) {
     ex.addRow(['Model design', 'Kimi K3 architect', `${design.overrides.length} overrides, ${design.scenarios.length} scenarios, ${design.obligations.length} obligations`]);
-    for (const n of design.modelNotes.slice(0, 4)) ex.addRow(['', '', n.substring(0, 90)]);
+    for (const n of design.modelNotes.slice(0, 4)) ex.addRow(['', '', n]);
   }
   ['B5', 'B6', 'B7', 'B11', 'B12', 'B15', 'B16'].forEach(c => { try { ex.getCell(c).numFmt = MONEY; } catch { /* noop */ } });
   ex.getCell('B9').numFmt = '0.00%';
   ex.getCell('B10').numFmt = X;
   dscrConditional(ex, 'B10');
   boxTable(ex, 4, ex.rowCount, 3, false);
+  wrapCol(ex, [3], 4, ex.rowCount);
 
   // ==========================================================================
   // AUDIT
   // ==========================================================================
   const au = wb.addWorksheet('Audit');
-  au.columns = [{ width: 24 }, { width: 18 }, { width: 70 }];
-  const ab1 = au.addRow(['SOURCES']); bandRow(au, ab1.number, 3);
-  for (const s of deal.sources) au.addRow([s.id, s.kind, s.filename ?? '']);
-  const ab2 = au.addRow(['STRUCTURE FLAGS']); bandRow(au, ab2.number, 3);
+  au.columns = [{ width: 22 }, { width: 8 }, { width: 62 }, { width: 46 }];
+  const wrapCols = (rowNum: number, cols: number[]) => {
+    for (const c of cols) au.getRow(rowNum).getCell(c).alignment = { wrapText: true, vertical: 'top' };
+  };
+  const ab1 = au.addRow(['SOURCES']); bandRow(au, ab1.number, 4);
+  for (const s of deal.sources) {
+    const r = au.addRow([s.id, '', s.filename ?? '', s.kind]);
+    wrapCols(r.number, [3]);
+  }
+  const ab2 = au.addRow(['STRUCTURE FLAGS', 'Conf', 'Flag and detail (full text)', 'Evidence quote']); bandRow(au, ab2.number, 4);
   for (const n of notes.filter(n => n.field === 'structureFlag')) {
-    au.addRow([n.extractedValue.split(':')[0], n.confidence.toFixed(2), n.extractedValue.replace(/^[A-Z]+:\s*/, '').substring(0, 140)]);
+    const severity = (n.extractedValue.match(/^([A-Z]+):/) ?? [])[1] ?? '';
+    // Full text, never truncated; wrapping handles length
+    const r = au.addRow([severity, n.confidence.toFixed(2), n.extractedValue.replace(/^[A-Z]+:\s*/, ''), (n.rawText ?? '').replace(/^"|"$/g, '')]);
+    wrapCols(r.number, [3, 4]);
+    if (severity === 'SERIOUS') { fillCell(r.getCell(1), BAD); r.getCell(1).font = { bold: true, color: { argb: WHITE } }; }
+    else if (severity === 'CAUTION') { fillCell(r.getCell(1), WARN); r.getCell(1).font = { bold: true, color: { argb: WHITE } }; }
   }
-  const ab3 = au.addRow(['AUDIT LOG (last 50)']); bandRow(au, ab3.number, 3);
+  const ab3 = au.addRow(['AUDIT LOG (last 50)']); bandRow(au, ab3.number, 4);
   for (const entry of deal.auditLog.slice(-50)) {
-    au.addRow([entry.timestamp, entry.action, JSON.stringify(entry.details).substring(0, 180)]);
+    const r = au.addRow([entry.timestamp, '', entry.action, JSON.stringify(entry.details).substring(0, 300)]);
+    wrapCols(r.number, [4]);
   }
-  boxTable(au, 2, au.rowCount, 3, false);
+  boxTable(au, 2, au.rowCount, 4, false);
 
   // Order + tabs
   ex.orderNo = 0; as.orderNo = 1; su.orderNo = 2; dz.orderNo = 3; pf.orderNo = 4;

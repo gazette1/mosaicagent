@@ -661,7 +661,8 @@ program
   .description('Generate the institutional underwriting model XLSX (live formulas)')
   .requiredOption('-d, --deal <dealId>', 'Deal ID')
   .option('--no-architect', 'Skip the K3 model-design pass (pure deterministic template)')
-  .action(async (options: { deal: string; architect: boolean }) => {
+  .option('--reuse-design', 'Reuse the persisted model-design.json instead of a fresh K3 pass')
+  .action(async (options: { deal: string; architect: boolean; reuseDesign?: boolean }) => {
     if (!dealExists(options.deal)) {
       console.error(`Error: Deal not found: ${options.deal}`);
       process.exit(1);
@@ -674,11 +675,16 @@ program
       // schedules); code builds every formula. Falls back to the generic
       // template on any architect failure: the workbook always generates.
       let design;
-      if (options.architect !== false && llmAvailable()) {
+      const designPath = path.join(outDir, 'model-design.json');
+      if (options.architect !== false && options.reuseDesign && fs.existsSync(designPath)) {
+        design = JSON.parse(fs.readFileSync(designPath, 'utf-8'));
+        console.log(`✓ Reusing persisted K3 design (${designPath})`);
+      } else if (options.architect !== false && llmAvailable()) {
         try {
           console.log('Model design pass (routed: architect tier)...');
           const r = await designModel(deal);
           design = r.design;
+          fs.writeFileSync(designPath, JSON.stringify(design, null, 2));
           deal.auditLog.push({
             timestamp: new Date().toISOString(),
             action: 'MODEL_DESIGNED',

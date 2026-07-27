@@ -120,12 +120,12 @@ export async function generateMemo(deal: Deal): Promise<MemoResult> {
   const regulatory: Row[] = serious.slice(0, 8).map(n => {
     const body = n.extractedValue.replace(/^[A-Z]+:\s*/, '');
     const [label, ...rest] = body.split(' - ');
-    return [label, rest.join(' - ').substring(0, 110)];
+    return [label, rest.join(' - ')]; // full text; HTML and markdown wrap naturally
   });
   const redLine: Row[] = (screen?.killFlags ?? []).map(f => [
     f.criterion,
     f.triggered ? 'FLAGGED' : 'CLEAR',
-    (f.reason ?? '').substring(0, 100),
+    f.reason ?? '', // full text; both renderers wrap
   ]);
   const pf: Row[] = proForma.map(y => [
     `Year ${y.year}`, usd(y.noi), usd(y.debtService),

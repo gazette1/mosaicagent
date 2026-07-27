@@ -1,7 +1,7 @@
 window.EVAL_DATA = {
  "latest": {
-  "timestamp": "2026-07-27T23:25:48.245Z",
-  "commit": "51e8031",
+  "timestamp": "2026-07-27T23:52:47.814Z",
+  "commit": "f377931",
   "overall": 1,
   "cases": [
    {
@@ -122,7 +122,7 @@ window.EVAL_DATA = {
    }
   ],
   "regression": {
-   "prevCommit": "1635881",
+   "prevCommit": "51e8031",
    "prevOverall": 1,
    "delta": 0,
    "regressed": false,
@@ -1832,6 +1832,145 @@ window.EVAL_DATA = {
    ],
    "regression": {
     "prevCommit": "1635881",
+    "prevOverall": 1,
+    "delta": 0,
+    "regressed": false,
+    "perCase": [
+     {
+      "name": "industrial-samples",
+      "delta": 0
+     },
+     {
+      "name": "sandcastle-hotel",
+      "delta": 0
+     }
+    ]
+   }
+  },
+  {
+   "timestamp": "2026-07-27T23:52:47.814Z",
+   "commit": "f377931",
+   "overall": 1,
+   "cases": [
+    {
+     "name": "industrial-samples",
+     "rubric": {
+      "correctness": 1,
+      "completeness": 1,
+      "consistency": 1,
+      "cost": 1
+     },
+     "score": 1,
+     "checks": [
+      {
+       "label": "deal created",
+       "ok": true
+      },
+      {
+       "label": "T12 NOI = 304,600",
+       "ok": true
+      },
+      {
+       "label": "NOI confidence >= 0.8",
+       "ok": true
+      },
+      {
+       "label": "rent roll: 10 units",
+       "ok": true
+      },
+      {
+       "label": "asking price extracted",
+       "ok": true
+      },
+      {
+       "label": "verdict KILL at market rates",
+       "ok": true
+      },
+      {
+       "label": "DSCR kill flag triggered",
+       "ok": true
+      },
+      {
+       "label": "entry cap 6.5-8.5%",
+       "ok": true
+      },
+      {
+       "label": "stressed DSCR 0.9-1.1x",
+       "ok": true
+      },
+      {
+       "label": "trajectory: sources before screen",
+       "ok": true
+      },
+      {
+       "label": "trajectory: no invented numbers (all tracked have source or formula)",
+       "ok": true
+      }
+     ]
+    },
+    {
+     "name": "sandcastle-hotel",
+     "rubric": {
+      "correctness": 1,
+      "completeness": 1,
+      "consistency": 1,
+      "cost": 1
+     },
+     "score": 1,
+     "checks": [
+      {
+       "label": "keys = 150",
+       "ok": true
+      },
+      {
+       "label": "ADR extracted (100-170)",
+       "ok": true
+      },
+      {
+       "label": "NOI = 2,843,000 (memo Y3)",
+       "ok": true
+      },
+      {
+       "label": "price/basis = 18.4MM order of magnitude",
+       "ok": true
+      },
+      {
+       "label": "verdict is not KILL",
+       "ok": true
+      },
+      {
+       "label": "DSCR sane (0.5-3.0x)",
+       "ok": true
+      },
+      {
+       "label": "workbook generated",
+       "ok": true
+      },
+      {
+       "label": "10-sheet institutional layout",
+       "ok": true
+      },
+      {
+       "label": "RevPAR is a formula (occ x ADR)",
+       "ok": true
+      },
+      {
+       "label": "all-in rate built as index + spread bps",
+       "ok": true
+      },
+      {
+       "label": "perm takeout sized as min of three constraints",
+       "ok": true
+      },
+      {
+       "label": "sources & uses balance check present",
+       "ok": true
+      }
+     ]
+    }
+   ],
+   "regression": {
+    "prevCommit": "51e8031",
     "prevOverall": 1,
     "delta": 0,
     "regressed": false,
