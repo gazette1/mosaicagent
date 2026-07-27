@@ -218,6 +218,26 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && req.url.startsWith('/api/memo/')) {
+    const dealId = req.url.split('/').pop().replace(/[^a-z0-9-]/g, '');
+    const p = path.join(REPO, 'deals', dealId, 'outputs', 'memo.html');
+    if (!fs.existsSync(p)) return json(res, 404, { error: 'not found' });
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(fs.readFileSync(p));
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/api/back/memo') {
+    readJson(req, res, 1024 * 1024, ({ dealId }) => {
+      try {
+        const clean = dealId.replace(/[^a-z0-9-]/g, '');
+        run(['memo', '--deal', clean]);
+        json(res, 200, { memoUrl: `/api/memo/${clean}`, snapshot: dealSnapshot(dealId) });
+      } catch (e) { json(res, 500, { error: (e.message || 'failed').substring(0, 200) }); }
+    });
+    return;
+  }
+
   if (req.method === 'POST' && req.url === '/api/back/narrative') {
     readJson(req, res, 1024 * 1024, ({ dealId }) => {
       try {

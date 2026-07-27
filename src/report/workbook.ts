@@ -185,6 +185,25 @@ export async function buildDealWorkbook(deal: Deal, outDir: string): Promise<str
     pf.getCell('B2').numFmt = MONEY;
   }
 
+  // Five-year pro forma: growth is a lever, everything else recomputes
+  pf.addRow([]);
+  const pfHead = pf.addRow(['FIVE-YEAR PRO FORMA', 'Y1', 'Y2', 'Y3', 'Y4', 'Y5']);
+  const growthRow = pf.addRow(['NOI Growth (lever)', 0.025, '', '', '', '']);
+  const gAddr = `$B$${growthRow.number}`;
+  const noiRowN = pf.addRow(['NOI', { formula: noiAddr.replace(/'Pro Forma'!/, '') },
+    ...[2, 3, 4, 5].map((_, i) => ({ formula: `${String.fromCharCode(66 + i)}${growthRow.number + 1}*(1+${gAddr})` }))]).number;
+  pf.addRow(['Debt Service (IO, stressed)', ...['B', 'C', 'D', 'E', 'F'].map(() => ({ formula: 'Debt!$B$10' }))]);
+  pf.addRow(['DSCR', ...['B', 'C', 'D', 'E', 'F'].map(c => ({ formula: `IF(${c}${noiRowN + 1}=0,"n/a",${c}${noiRowN}/${c}${noiRowN + 1})` }))]);
+  pf.addRow(['Cash Flow After DS', ...['B', 'C', 'D', 'E', 'F'].map(c => ({ formula: `${c}${noiRowN}-${c}${noiRowN + 1}` }))]);
+  for (const c of ['B', 'C', 'D', 'E', 'F']) {
+    pf.getCell(`${c}${noiRowN}`).numFmt = MONEY;
+    pf.getCell(`${c}${noiRowN + 1}`).numFmt = MONEY;
+    pf.getCell(`${c}${noiRowN + 2}`).numFmt = X;
+    pf.getCell(`${c}${noiRowN + 3}`).numFmt = MONEY;
+  }
+  pf.getCell(`B${growthRow.number}`).numFmt = PCT;
+  const pfExtras = { headRow: pfHead.number, leverCell: `B${growthRow.number}`, lastRow: noiRowN + 3, dscrRange: `B${noiRowN + 2}:F${noiRowN + 2}` };
+
   // ==========================================================================
   // Debt
   // ==========================================================================
@@ -338,7 +357,11 @@ export async function buildDealWorkbook(deal: Deal, outDir: string): Promise<str
 
   // Inputs / Pro Forma / Debt: band + box + freeze
   bandRow(inp, 1, 6); boxTable(inp, 2, inp.rowCount, 6, false); freeze(inp);
-  bandRow(pf, 1, isHotel ? 3 : 3); boxTable(pf, 2, isHotel ? 11 : 2, 3); freeze(pf);
+  bandRow(pf, 1, 3); boxTable(pf, 2, isHotel ? 11 : 2, 3); freeze(pf);
+  bandRow(pf, pfExtras.headRow, 6);
+  boxTable(pf, pfExtras.headRow + 1, pfExtras.lastRow, 6, false);
+  fillCell(pf.getCell(pfExtras.leverCell), LEVER);
+  dscrConditional(pf, pfExtras.dscrRange);
   bandRow(dt, 1, 3); boxTable(dt, 2, 17, 3); freeze(dt);
   dscrConditional(dt, 'B12');
   dscrConditional(dt, 'B17');

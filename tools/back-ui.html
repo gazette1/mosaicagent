@@ -70,6 +70,7 @@
       <button id="screenBtn" class="alt" disabled>Re-run screen</button>
       <button id="wbBtn" class="alt" disabled>Workbook (XLSX)</button>
       <button id="narBtn" class="alt" disabled>Draft narrative</button>
+      <button id="memoBtn" class="alt" disabled>Underwriting memo</button>
     </div>
     <div id="spend"></div>
   </div>
@@ -146,7 +147,7 @@
     if (!dealId || !$('queue').children.length) return;
     const j = await api('/api/back/screen', { dealId });
     if (j.snapshot) renderSnapshot(j.snapshot);
-    $('screenBtn').disabled = $('wbBtn').disabled = $('narBtn').disabled = false;
+    $('screenBtn').disabled = $('wbBtn').disabled = $('narBtn').disabled = $('memoBtn').disabled = false;
   }
 
   $('screenBtn').addEventListener('click', autoScreen);
@@ -156,6 +157,14 @@
     $('wbBtn').disabled = false;
     if (j.workbookUrl) window.location = j.workbookUrl;
   });
+  $('memoBtn').addEventListener('click', async () => {
+    $('memoBtn').disabled = true; $('memoBtn').textContent = 'Drafting...';
+    const j = await api('/api/back/memo', { dealId });
+    $('memoBtn').disabled = false; $('memoBtn').textContent = 'Underwriting memo';
+    if (j.snapshot) renderSnapshot(j.snapshot);
+    if (j.memoUrl) window.open(j.memoUrl, '_blank');
+  });
+
   $('narBtn').addEventListener('click', async () => {
     $('narBtn').disabled = true; $('narBtn').textContent = 'Drafting...';
     const j = await api('/api/back/narrative', { dealId });

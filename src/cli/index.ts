@@ -38,6 +38,7 @@ import { deepDiveDeal } from '../underwrite/deepdive';
 import { generateScreenReport } from '../report/screen-report';
 import { generateICMemo } from '../report/ic-memo';
 import { buildDealWorkbook } from '../report/workbook';
+import { generateMemo } from '../report/memo';
 import { auditDataExtracted, auditProxyApplied, auditSourceAdded } from '../core/audit';
 
 const program = new Command();
@@ -604,6 +605,49 @@ program
       console.log('  Risk rating and recommendation intentionally absent: human owns judgment.');
     } catch (error) {
       console.error('Error drafting narrative:', error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+// ============================================================================
+// MEMO COMMAND - Internal underwriting memo (Fulton format, Mosaic verdict)
+// ============================================================================
+program
+  .command('memo')
+  .description('Internal underwriting memo with Mosaic verdict (PURSUE/MONITOR/PASS)')
+  .requiredOption('-d, --deal <dealId>', 'Deal ID')
+  .action(async (options: { deal: string }) => {
+    if (!dealExists(options.deal)) {
+      console.error(`Error: Deal not found: ${options.deal}`);
+      process.exit(1);
+    }
+    if (!llmAvailable()) {
+      console.error('Error: OPENAI_API_KEY not set (.env)');
+      process.exit(1);
+    }
+    try {
+      const deal = loadDeal(options.deal);
+      console.log('Drafting underwriting memo (routed: narrative tier)...');
+      const result = await generateMemo(deal);
+      const mdPath = writeOutput(deal.dealId, 'memo.md', result.markdown);
+      const htmlPath = writeOutput(deal.dealId, 'memo.html', result.html);
+      deal.auditLog.push({
+        timestamp: new Date().toISOString(),
+        action: 'MEMO_DRAFTED',
+        details: {
+          model: result.usage.model,
+          inputTokens: result.usage.inputTokens,
+          outputTokens: result.usage.outputTokens,
+          estCostUsd: +result.usage.estCostUsd.toFixed(5),
+        },
+      });
+      saveDeal(deal);
+      console.log(`✓ Memo: ${mdPath}`);
+      console.log(`✓ Styled HTML: ${htmlPath}`);
+      console.log(`  ${result.usage.model}, ${result.usage.inputTokens} in / ${result.usage.outputTokens} out, ~$${result.usage.estCostUsd.toFixed(4)}`);
+      console.log('  Verdict is the doctrine screen in Mosaic vocabulary; analyst confirms or overrides.');
+    } catch (error) {
+      console.error('Error drafting memo:', error instanceof Error ? error.message : error);
       process.exit(1);
     }
   });
