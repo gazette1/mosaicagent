@@ -1,19 +1,38 @@
 {
   "providers": {
-    "openai": { "baseUrl": "https://api.openai.com/v1", "keyEnv": "OPENAI_API_KEY" },
-    "moonshot": { "baseUrl": "https://api.moonshot.ai/v1", "keyEnv": "MOONSHOT_API_KEY" }
+    "openai": {
+      "baseUrl": "https://api.openai.com/v1",
+      "keyEnv": "OPENAI_API_KEY"
+    },
+    "moonshot": {
+      "baseUrl": "https://api.moonshot.ai/v1",
+      "keyEnv": "MOONSHOT_API_KEY"
+    }
   },
   "routing": {
     "extraction": "openai:gpt-5.4-nano",
     "judge": "openai:gpt-5.4-nano",
     "narrative": "moonshot:kimi-k3",
-    "escalation": "moonshot:kimi-k3"
+    "escalation": "moonshot:kimi-k3",
+    "architect": "moonshot:kimi-k3"
   },
   "estPricePer1M": {
-    "gpt-5.4-nano": { "input": 0.05, "output": 0.4 },
-    "gpt-5.4-mini": { "input": 0.25, "output": 2.0 },
-    "gpt-5.5": { "input": 2.0, "output": 16.0 },
-    "kimi-k3": { "input": 0.8, "output": 3.0 }
+    "gpt-5.4-nano": {
+      "input": 0.05,
+      "output": 0.4
+    },
+    "gpt-5.4-mini": {
+      "input": 0.25,
+      "output": 2.0
+    },
+    "gpt-5.5": {
+      "input": 2.0,
+      "output": 16.0
+    },
+    "kimi-k3": {
+      "input": 0.8,
+      "output": 3.0
+    }
   },
   "notes": "Routing scaled by price and fit: nano-tier for extraction and judging (cheap, reliable structured output), Kimi K3 for narrative/memo generation and escalation (Russ direction, 2026-07-27). Prices are ESTIMATES; kimi-k3 pricing patterned on the K2 family and unverified. Check platform.moonshot.ai and platform.openai.com before quoting costs."
 }

@@ -39,6 +39,7 @@ import { generateScreenReport } from '../report/screen-report';
 import { generateICMemo } from '../report/ic-memo';
 import { buildDealWorkbook } from '../report/workbook';
 import { generateMemo } from '../report/memo';
+import { designModel } from '../report/model-architect';
 import { auditDataExtracted, auditProxyApplied, auditSourceAdded } from '../core/audit';
 
 const program = new Command();
@@ -657,9 +658,10 @@ program
 // ============================================================================
 program
   .command('workbook')
-  .description('Generate the multi-sheet lender package XLSX (live formulas)')
+  .description('Generate the institutional underwriting model XLSX (live formulas)')
   .requiredOption('-d, --deal <dealId>', 'Deal ID')
-  .action(async (options: { deal: string }) => {
+  .option('--no-architect', 'Skip the K3 model-design pass (pure deterministic template)')
+  .action(async (options: { deal: string; architect: boolean }) => {
     if (!dealExists(options.deal)) {
       console.error(`Error: Deal not found: ${options.deal}`);
       process.exit(1);
@@ -667,10 +669,41 @@ program
     try {
       const deal = loadDeal(options.deal);
       const outDir = path.join(process.cwd(), 'deals', deal.dealId, 'outputs');
-      const outPath = await buildDealWorkbook(deal, outDir);
+
+      // K3 designs the model (overrides, deal-specific scenarios, obligation
+      // schedules); code builds every formula. Falls back to the generic
+      // template on any architect failure: the workbook always generates.
+      let design;
+      if (options.architect !== false && llmAvailable()) {
+        try {
+          console.log('Model design pass (routed: architect tier)...');
+          const r = await designModel(deal);
+          design = r.design;
+          deal.auditLog.push({
+            timestamp: new Date().toISOString(),
+            action: 'MODEL_DESIGNED',
+            details: {
+              model: r.usage.model,
+              overrides: design.overrides.length,
+              scenarios: design.scenarios.length,
+              obligations: design.obligations.length,
+              inputTokens: r.usage.inputTokens,
+              outputTokens: r.usage.outputTokens,
+              estCostUsd: +r.usage.estCostUsd.toFixed(5),
+            },
+          });
+          saveDeal(deal);
+          console.log(`  ✓ K3 design: ${design.overrides.length} overrides, ${design.scenarios.length} scenarios, ${design.obligations.length} obligations (~$${r.usage.estCostUsd.toFixed(4)})`);
+          for (const o of design.overrides) console.log(`    lever ${o.lever} = ${o.value}: ${o.rationale.substring(0, 70)}`);
+          for (const s of design.scenarios) console.log(`    scenario "${s.name}": ${s.rationale.substring(0, 60)}`);
+        } catch (e) {
+          console.warn(`  Architect pass failed, generic template used: ${e instanceof Error ? e.message : e}`);
+        }
+      }
+
+      const outPath = await buildDealWorkbook(deal, outDir, design);
       console.log(`✓ Workbook written: ${outPath}`);
-      console.log('  Sheets: Summary, Inputs, Pro Forma, Debt, Sensitivity, Audit');
-      console.log('  All computed cells are live formulas; Inputs carries source + confidence per value');
+      console.log('  All computed cells are live formulas; Assumptions carries source + confidence per input');
     } catch (error) {
       console.error('Error generating workbook:', error instanceof Error ? error.message : error);
       process.exit(1);

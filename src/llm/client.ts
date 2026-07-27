@@ -115,14 +115,14 @@ export async function callJson<T = unknown>(
   const c = getModelsConfig();
   const price = c.estPricePer1M[model] ?? { input: 0, output: 0 };
 
-  const attempt = async (useStrictSchema: boolean) => {
+  const attempt = async (useStrictSchema: boolean, budgetMultiplier = 1) => {
     const sys = useStrictSchema
       ? system
       : `${system}\n\nRespond with a single JSON object matching this JSON Schema exactly (no extra keys, no prose):\n${JSON.stringify(schema)}`;
     // Kimi K3 is a reasoning model: hidden reasoning tokens count against the
     // completion budget, so give it headroom. Param name also differs.
     const isMoonshot = provider === 'moonshot';
-    const tokenBudget = isMoonshot ? Math.max(maxOutputTokens * 2, maxOutputTokens + 1500) : maxOutputTokens;
+    const tokenBudget = (isMoonshot ? Math.max(maxOutputTokens * 2, maxOutputTokens + 1500) : maxOutputTokens) * budgetMultiplier;
     const body: Record<string, unknown> = {
       model,
       messages: [
@@ -163,12 +163,15 @@ export async function callJson<T = unknown>(
     attempts = i;
     try {
       const useStrict = !schemaUnsupported.has(provider);
+      // Reasoning models can burn the whole budget thinking before emitting
+      // content ("empty completion"): the second attempt triples the budget.
+      const mult = i === 1 ? 1 : 3;
       let out;
       try {
-        out = await attempt(useStrict);
+        out = await attempt(useStrict, mult);
       } catch (e) {
         // Immediate same-attempt fallback when the provider rejects the schema format
-        if ((e as { schemaReject?: boolean }).schemaReject) out = await attempt(false);
+        if ((e as { schemaReject?: boolean }).schemaReject) out = await attempt(false, mult);
         else throw e;
       }
       const inTok = out.usage?.prompt_tokens ?? 0;

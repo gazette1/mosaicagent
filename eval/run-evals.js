@@ -92,7 +92,7 @@ function caseSandcastle() {
   const dealId = (out.match(/Created deal: (\S+)/) || [])[1];
   run(cwd, ['ingest', '--deal', dealId, '--file', memo, '--kind', 'om_text']);
   run(cwd, ['screen', '--deal', dealId]);
-  run(cwd, ['workbook', '--deal', dealId]);
+  run(cwd, ['workbook', '--deal', dealId, '--no-architect']);
 
   const deal = JSON.parse(fs.readFileSync(path.join(cwd, 'deals', dealId, 'deal.json'), 'utf-8'));
   const screen = JSON.parse(fs.readFileSync(path.join(cwd, 'deals', dealId, 'outputs', 'screen.json'), 'utf-8'));

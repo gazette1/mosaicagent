@@ -20,6 +20,7 @@ import * as path from 'path';
 import { Deal, TrackedNumber } from '../core/schemas';
 import { ASSET_TYPE_CRITERIA, DEFAULT_STRESSES } from '../core/doctrine';
 import { getMarketConfig } from '../core/market-config';
+import { ArchitectDesign } from './model-architect';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const ExcelJS = require('exceljs');
@@ -83,7 +84,7 @@ const VERDICT_COLORS: Record<string, string> = { KILL: BAD, CHASE: GOOD, STRUCTU
 // Column letters for the 10-year pro forma (B..K)
 const YCOLS = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'];
 
-export async function buildDealWorkbook(deal: Deal, outDir: string): Promise<string> {
+export async function buildDealWorkbook(deal: Deal, outDir: string, design?: ArchitectDesign): Promise<string> {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Mosaic Capital Solutions';
 
@@ -195,6 +196,16 @@ export async function buildDealWorkbook(deal: Deal, outDir: string): Promise<str
   // Fix the two placeholder formulas now that rows are known
   as.getCell(`B${A['closing']}`).value = { formula: `B${A['loan']}*0.015` };
   as.getCell(`B${A['tpc']}`).value = { formula: `B${A['price']}+B${A['capex']}+B${A['ffe']}+B${A['closing']}` };
+
+  // K3 architect overrides: value replaced, rationale in the source column,
+  // amber so the analyst sees which inputs came from model judgment
+  for (const o of design?.overrides ?? []) {
+    const row = A[o.lever];
+    if (!row) continue;
+    as.getCell(`B${row}`).value = o.value; // replaces formula cells too (e.g. stated all-in rate)
+    as.getCell(`C${row}`).value = `K3 proposed: ${o.rationale}`;
+    if (!lever.includes(row)) lever.push(row);
+  }
 
   for (const r of lever) fillCell(as.getRow(r).getCell(2), LEVER);
   boxTable(as, 4, as.rowCount, 4, false);
@@ -395,13 +406,17 @@ export async function buildDealWorkbook(deal: Deal, outDir: string): Promise<str
   mc.columns = [{ width: 26 }, { width: 14 }, { width: 12 }, { width: 14 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 26 }];
   const mch = mc.addRow(['Scenario', 'Rate D (bps)', 'NOI D (%)', 'Exit Cap D (bps)', 'DSCR', 'Debt Yield', 'Exit LTV', 'Read']);
   bandRow(mc, mch.number, 8);
-  const MACROS: [string, number, number, number][] = [
-    ['Base (perm)', 0, 0, 0],
-    ['Rate shock +200', 200, 0, 0],
-    ['Recession', 50, -15, 50],
-    ['Stagflation', 150, -10, 75],
-    ['Refi market freeze', 100, 0, 150],
-  ];
+  // Deal-specific scenarios from the K3 architect when present; generic set
+  // otherwise. Delta cells stay levers either way.
+  const MACROS: [string, number, number, number][] = design?.scenarios?.length
+    ? design.scenarios.map(s => [s.name, s.rateDeltaBps, s.noiDeltaPct, s.capDeltaBps] as [string, number, number, number])
+    : [
+        ['Base (perm)', 0, 0, 0],
+        ['Rate shock +200', 200, 0, 0],
+        ['Recession', 50, -15, 50],
+        ['Stagflation', 150, -10, 75],
+        ['Refi market freeze', 100, 0, 150],
+      ];
   MACROS.forEach((m, i) => {
     const r = i + 2;
     mc.addRow([
@@ -413,9 +428,48 @@ export async function buildDealWorkbook(deal: Deal, outDir: string): Promise<str
     ]);
     ['B', 'C', 'D'].forEach(c => fillCell(mc.getCell(`${c}${r}`), LEVER));
     mc.getCell(`E${r}`).numFmt = X; mc.getCell(`F${r}`).numFmt = PCT; mc.getCell(`G${r}`).numFmt = PCT;
+    if (design?.scenarios?.length) mc.getCell(`H${r}`).note = undefined;
   });
-  dscrConditional(mc, 'E2:E6');
-  boxTable(mc, 2, 6, 8, false);
+  const mcLast = 1 + MACROS.length;
+  dscrConditional(mc, `E2:E${mcLast}`);
+  boxTable(mc, 2, mcLast, 8, false);
+  if (design?.scenarios?.length) {
+    mc.addRow([]);
+    mc.addRow(['Scenarios designed by Kimi K3 from this deal\'s structure flags; deltas are levers.']);
+    design.scenarios.forEach((s, i) => mc.addRow([`${i + 2 <= mcLast ? '' : ''}${s.name}`, '', '', '', '', '', '', s.rationale.substring(0, 80)]));
+  }
+
+  // ==========================================================================
+  // OBLIGATIONS SCHEDULE (K3-designed: earnouts, deferred fees, seller notes)
+  // ==========================================================================
+  let ob: Ws | null = null;
+  if (design?.obligations?.length) {
+    ob = wb.addWorksheet('Obligations');
+    ob.columns = [{ width: 34 }, ...Array(5).fill({ width: 14 }), { width: 44 }];
+    ob.addRow(['OBLIGATIONS PAID FROM CASH FLOW (K3-designed, amounts from documents)']).font = { bold: true, color: { argb: NAVY } };
+    const oh = ob.addRow(['Obligation', 'Year 1', 'Year 2', 'Year 3', 'Year 4', 'Year 5', 'Rationale']);
+    bandRow(ob, oh.number, 7);
+    const firstDataRow = oh.number + 1;
+    for (const o of design.obligations) {
+      const r = ob.addRow([o.label, ...o.annualAmounts, o.rationale.substring(0, 90)]);
+      for (let c = 2; c <= 6; c++) { r.getCell(c).numFmt = MONEY; fillCell(r.getCell(c), LEVER); }
+    }
+    const lastDataRow = ob.rowCount;
+    const tot = ob.addRow(['TOTAL OBLIGATIONS', ...['B', 'C', 'D', 'E', 'F'].map(c => ({ formula: `SUM(${c}${firstDataRow}:${c}${lastDataRow})` })), '']);
+    const cfRow = ob.addRow(['CF After DS (Pro Forma)', ...['B', 'C', 'D', 'E', 'F'].map(c => ({ formula: `'Pro Forma'!${c}${P['cf']}` })), '']);
+    const netRow = ob.addRow(['NET CF AFTER OBLIGATIONS', ...['B', 'C', 'D', 'E', 'F'].map(c => ({ formula: `${c}${cfRow.number}-${c}${tot.number}` })), 'negative = obligations not coverable']);
+    [tot.number, cfRow.number, netRow.number].forEach(rn => { for (let c = 2; c <= 6; c++) ob.getRow(rn).getCell(c).numFmt = MONEY; });
+    ob.addConditionalFormatting({
+      ref: `B${netRow.number}:F${netRow.number}`,
+      rules: [
+        { type: 'cellIs', operator: 'lessThan', formulae: ['0'], priority: 1,
+          style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: BAD } }, font: { color: { argb: WHITE }, bold: true } } },
+        { type: 'cellIs', operator: 'greaterThanOrEqual', formulae: ['0'], priority: 2,
+          style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: GOOD } }, font: { color: { argb: WHITE }, bold: true } } },
+      ],
+    });
+    boxTable(ob, oh.number + 1, ob.rowCount, 7, false);
+  }
 
   // ==========================================================================
   // EXECUTIVE SUMMARY
@@ -452,6 +506,10 @@ export async function buildDealWorkbook(deal: Deal, outDir: string): Promise<str
   const sfSerious = notes.filter(n => n.field === 'structureFlag' && /^SERIOUS/.test(n.extractedValue)).length;
   ex.addRow(['Structure Flags', `${sfCount} (${sfSerious} serious)`, 'full list on Audit sheet']);
   ex.addRow(['Amber cells', 'levers / defaults', 'analyst-editable or unverified inputs']);
+  if (design) {
+    ex.addRow(['Model design', 'Kimi K3 architect', `${design.overrides.length} overrides, ${design.scenarios.length} scenarios, ${design.obligations.length} obligations`]);
+    for (const n of design.modelNotes.slice(0, 4)) ex.addRow(['', '', n.substring(0, 90)]);
+  }
   ['B5', 'B6', 'B7', 'B11', 'B12', 'B15', 'B16'].forEach(c => { try { ex.getCell(c).numFmt = MONEY; } catch { /* noop */ } });
   ex.getCell('B9').numFmt = '0.00%';
   ex.getCell('B10').numFmt = X;
@@ -477,10 +535,13 @@ export async function buildDealWorkbook(deal: Deal, outDir: string): Promise<str
 
   // Order + tabs
   ex.orderNo = 0; as.orderNo = 1; su.orderNo = 2; dz.orderNo = 3; pf.orderNo = 4;
-  st.orderNo = 5; sn.orderNo = 6; sc.orderNo = 7; mc.orderNo = 8; au.orderNo = 9;
+  st.orderNo = 5; sn.orderNo = 6; sc.orderNo = 7; mc.orderNo = 8;
+  if (ob) ob.orderNo = 9;
+  au.orderNo = 10;
   const tab = (ws: Ws, argb: string) => (ws.properties.tabColor = { argb });
   tab(ex, NAVY_DARK); tab(as, WARN); tab(su, NAVY); tab(dz, NAVY_DARK); tab(pf, NAVY);
   tab(st, NAVY); tab(sn, 'FF8A8A8A'); tab(sc, GOOD); tab(mc, WARN); tab(au, 'FF8A8A8A');
+  if (ob) tab(ob, BAD);
 
   const outPath = path.join(outDir, 'package.xlsx');
   await wb.xlsx.writeFile(outPath);
