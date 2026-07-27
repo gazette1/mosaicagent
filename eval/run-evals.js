@@ -109,14 +109,23 @@ function caseSandcastle() {
   checks.push(['workbook generated', fs.existsSync(wbPath)]);
   const ExcelJS = require(path.join(REPO, 'node_modules', 'exceljs'));
   return (async () => {
+    // Golden updated 2026-07-27 (Russ-directed): workbook rebuilt to the
+    // institutional reference-model layout (Radisson/Harborside standard).
+    // Assumptions is the single source of truth; 10-sheet contract.
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(wbPath);
     const names = wb.worksheets.map(w => w.name);
-    checks.push(['6 sheets present', ['Summary', 'Inputs', 'Pro Forma', 'Debt', 'Sensitivity', 'Audit'].every(n => names.includes(n))]);
+    checks.push(['10-sheet institutional layout', ['Executive Summary', 'Assumptions', 'Sources & Uses', 'Debt Sizing', 'Pro Forma', 'Stabilized P&L', 'Sensitivity', 'Scenarios', 'Macro Scenarios', 'Audit'].every(n => names.includes(n))]);
     const pf = wb.getWorksheet('Pro Forma');
-    checks.push(['hotel rooms revenue is a formula (keys x 365 x occ x ADR)', pf.getCell('B6').formula === 'B2*365*B3*B4']);
-    const dt = wb.getWorksheet('Debt');
-    checks.push(['rate built as index + spread', dt.getCell('B4').formula === 'B2+B3/10000']);
+    checks.push(['RevPAR is a formula (occ x ADR)', pf.getCell('B6').formula === 'B4*B5']);
+    const as = wb.getWorksheet('Assumptions');
+    let allinOk = false;
+    as.eachRow(r => { if (String(r.getCell(1).value) === 'All-In Rate' && String(r.getCell(2).formula || '').includes('/10000')) allinOk = true; });
+    checks.push(['all-in rate built as index + spread bps', allinOk]);
+    const dz = wb.getWorksheet('Debt Sizing');
+    checks.push(['perm takeout sized as min of three constraints', dz.getCell('B21').formula === 'MIN(B18:B20)']);
+    const su = wb.getWorksheet('Sources & Uses');
+    checks.push(['sources & uses balance check present', su.getCell('B13').formula === 'B12-B8']);
     return { name: 'sandcastle-hotel', checks, extractedFields: (deal.extracted.notes ?? []).length, expectedFields: 8 };
   })();
 }

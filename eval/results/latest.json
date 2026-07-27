@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-07-27T22:26:56.185Z",
-  "commit": "6eb43f4",
+  "timestamp": "2026-07-27T22:54:10.474Z",
+  "commit": "340b81d",
   "overall": 1,
   "cases": [
     {
@@ -98,22 +98,30 @@
           "ok": true
         },
         {
-          "label": "6 sheets present",
+          "label": "10-sheet institutional layout",
           "ok": true
         },
         {
-          "label": "hotel rooms revenue is a formula (keys x 365 x occ x ADR)",
+          "label": "RevPAR is a formula (occ x ADR)",
           "ok": true
         },
         {
-          "label": "rate built as index + spread",
+          "label": "all-in rate built as index + spread bps",
+          "ok": true
+        },
+        {
+          "label": "perm takeout sized as min of three constraints",
+          "ok": true
+        },
+        {
+          "label": "sources & uses balance check present",
           "ok": true
         }
       ]
     }
   ],
   "regression": {
-    "prevCommit": "7552ecb",
+    "prevCommit": "6eb43f4",
     "prevOverall": 1,
     "delta": 0,
     "regressed": false,
