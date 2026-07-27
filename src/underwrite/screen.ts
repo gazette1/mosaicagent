@@ -329,9 +329,39 @@ export function screenDeal(deal: Deal): ScreenResult {
   }
   
   // ============================================================================
+  // Owner-occupancy override
+  //
+  // An owner-occupied asset has little or no third-party property NOI by
+  // design: the income basis is the occupant / guarantor's business cash
+  // flow, which is deliberately OUTSIDE this asset agent's scope (guarantor
+  // analysis is a separate agent). Killing such a deal for "unverifiable
+  // income" is the wrong answer; the right answer is DELEGATE with an
+  // explicit routing reason. Only applies when unverifiable income is the
+  // sole hard kill: real hard kills (DSCR, cap compression) still kill.
+  // ============================================================================
+
+  const ownerOccupied = (deal.extracted.notes ?? []).some(
+    n => /owner[\s-]?occup/i.test(n.rawText ?? '') || /owner[\s-]?occup/i.test(n.extractedValue ?? '')
+  );
+  const hardKills = killFlags.filter(f => f.triggered && f.severity === 'hard');
+  if (
+    verdict === 'KILL' &&
+    ownerOccupied &&
+    hardKills.length === 1 &&
+    hardKills[0].criterion === 'Unclear/Unverifiable Income'
+  ) {
+    verdict = 'DELEGATE';
+    riskScore = 3;
+    riskScoreRationale =
+      'Owner-occupied asset: property-level NOI is structurally thin because the occupant is the sponsor. ' +
+      'The income basis is guarantor business cash flow, which is outside this asset agent\'s scope. ' +
+      'Route to guarantor analysis before any credit conclusion.';
+  }
+
+  // ============================================================================
   // Build output
   // ============================================================================
-  
+
   const output: ScreenOutput = {
     verdict,
     riskScore,

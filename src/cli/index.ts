@@ -698,73 +698,71 @@ program
 // ============================================================================
 
 /**
- * Apply extracted values from text parsing to the deal
+ * Apply extracted values from text parsing to the deal.
+ *
+ * Resolution rule: HIGHEST CONFIDENCE WINS across sources. First-wins let a
+ * "3 Cap" tax-form fragment beat an appraisal's stated 6.25% cap rate, and a
+ * superseded PSA price beat the executed amendment. Ties keep the incumbent.
  */
 function applyExtractedValues(
   deal: ReturnType<typeof loadDeal>,
   extractedValues: Record<string, { value: number | string; confidence: number; rawText: string }>,
   sourceId: string
 ): void {
-  // Apply asking price if extracted and not already set
-  if (extractedValues['askingPrice'] && !deal.askingPrice) {
-    const price = extractedValues['askingPrice'];
-    if (typeof price.value === 'number') {
-      deal.askingPrice = tracked(price.value, price.confidence, {
-        sourceId,
-        unit: 'USD',
-        rationale: `Extracted from text: "${price.rawText.substring(0, 50)}..."`,
-      });
-    }
+  const beats = (incoming: { confidence: number }, incumbent?: { confidence?: number } | null): boolean =>
+    !incumbent || incoming.confidence > (incumbent.confidence ?? 0);
+
+  const price = extractedValues['askingPrice'];
+  if (price && typeof price.value === 'number' && beats(price, deal.askingPrice)) {
+    deal.askingPrice = tracked(price.value, price.confidence, {
+      sourceId,
+      unit: 'USD',
+      rationale: `Extracted from text: "${price.rawText.substring(0, 50)}..."`,
+    });
   }
-  
-  // Apply location if extracted and not already set
+
+  // Location: keep the first plausible address (junk tax-form fragments carry
+  // the same pattern confidence, so confidence cannot arbitrate here)
   if (extractedValues['address'] && !deal.location) {
     const address = extractedValues['address'];
     if (typeof address.value === 'string') {
       deal.location = { address: address.value };
     }
   }
-  
-  // If NOI is extracted and no T12 exists, create a minimal T12
-  if (extractedValues['noi'] && !deal.extracted.t12) {
-    const noi = extractedValues['noi'];
-    if (typeof noi.value === 'number') {
-      deal.extracted.t12 = {
+
+  const noi = extractedValues['noi'];
+  if (noi && typeof noi.value === 'number' && beats(noi, deal.extracted.t12?.noi)) {
+    deal.extracted.t12 = {
+      sourceId,
+      revenue: [],
+      expenses: [],
+      noi: tracked(noi.value, noi.confidence, {
         sourceId,
-        revenue: [],
-        expenses: [],
-        noi: tracked(noi.value, noi.confidence, {
-          sourceId,
-          unit: 'USD/year',
-          rationale: `Extracted from text: "${noi.rawText.substring(0, 50)}..."`,
-        }),
-      };
-    }
-  }
-  
-  // Capital budget: a PIP or renovation budget in the room means capex IS
-  // priced, which is what the CapEx kill criterion tests against
-  if (extractedValues['capexTotal'] && !deal.assumptions.capexTotal) {
-    const capex = extractedValues['capexTotal'];
-    if (typeof capex.value === 'number') {
-      deal.assumptions.capexTotal = tracked(capex.value, capex.confidence, {
-        sourceId,
-        unit: 'USD',
-        rationale: `Renovation / PIP budget: "${capex.rawText.substring(0, 60)}"`,
-      });
-    }
+        unit: 'USD/year',
+        rationale: `Extracted from text: "${noi.rawText.substring(0, 50)}..."`,
+      }),
+    };
   }
 
-  // Apply cap rate as an assumption if extracted
-  if (extractedValues['capRate'] && !deal.assumptions.entryCap) {
-    const cap = extractedValues['capRate'];
-    if (typeof cap.value === 'number') {
-      deal.assumptions.entryCap = tracked(cap.value, cap.confidence - 0.1, { // Lower confidence for cap rate from text
-        sourceId,
-        unit: '%',
-        rationale: `Extracted from broker materials - verify independently`,
-      });
-    }
+  // Capital budget: a PIP or renovation budget in the room means capex IS
+  // priced, which is what the CapEx kill criterion tests against
+  const capex = extractedValues['capexTotal'];
+  if (capex && typeof capex.value === 'number' && beats(capex, deal.assumptions.capexTotal)) {
+    deal.assumptions.capexTotal = tracked(capex.value, capex.confidence, {
+      sourceId,
+      unit: 'USD',
+      rationale: `Renovation / PIP budget: "${capex.rawText.substring(0, 60)}"`,
+    });
+  }
+
+  // Apply cap rate as an assumption if extracted (highest confidence wins)
+  const cap = extractedValues['capRate'];
+  if (cap && typeof cap.value === 'number' && beats({ confidence: cap.confidence - 0.1 }, deal.assumptions.entryCap)) {
+    deal.assumptions.entryCap = tracked(cap.value, cap.confidence - 0.1, { // Lower confidence for cap rate from text
+      sourceId,
+      unit: '%',
+      rationale: `Extracted from broker materials - verify independently: "${cap.rawText.substring(0, 40)}"`,
+    });
   }
 }
 

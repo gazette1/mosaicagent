@@ -38,12 +38,13 @@ const EXTRACTION_PATTERNS: ExtractionPattern[] = [
     valueType: 'currency',
     confidence: 0.65,
   },
-  // Cap rate
+  // Cap rate. The bare-number form requires a % sign: tax forms are full of
+  // fragments like "3 Cap" (Schedule 3 Capital) that are not cap rates.
   {
     field: 'capRate',
     patterns: [
       /(?:cap\s*rate|going.in\s*cap)[\s:]*(\d+(?:\.\d+)?)\s*%?/i,
-      /(\d+(?:\.\d+)?)\s*%?\s*cap\s*(?:rate)?/i,
+      /(\d+(?:\.\d+)?)\s*%\s*cap\b/i,
     ],
     valueType: 'percent',
     confidence: 0.7,
