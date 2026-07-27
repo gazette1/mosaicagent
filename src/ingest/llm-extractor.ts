@@ -22,25 +22,44 @@ const EXTRACTION_FIELDS = [
 const SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  properties: Object.fromEntries(
-    EXTRACTION_FIELDS.map(f => [f, {
-      type: ['object', 'null'],
-      additionalProperties: false,
-      properties: {
-        value: { type: ['number', 'string'] },
-        quote: { type: 'string', description: 'short verbatim quote the value came from' },
-        confidence: { type: 'number' },
+  properties: {
+    ...Object.fromEntries(
+      EXTRACTION_FIELDS.map(f => [f, {
+        type: ['object', 'null'],
+        additionalProperties: false,
+        properties: {
+          value: { type: ['number', 'string'] },
+          quote: { type: 'string', description: 'short verbatim quote the value came from' },
+          confidence: { type: 'number' },
+        },
+        required: ['value', 'quote', 'confidence'],
+      }])
+    ),
+    // Categorical deal-structure red flags: the red tape numbers cannot carry.
+    structureFlags: {
+      type: 'array',
+      maxItems: 10,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          flag: { type: 'string', description: 'short label, e.g. GP interest transfer; Agency approval required; Evictions pending; Receivables outstanding; Deferred fee overhang; Regulatory agreement; Ground lease; Litigation' },
+          detail: { type: 'string', description: 'one sentence with the specifics and amounts' },
+          quote: { type: 'string', description: 'short verbatim quote, under 90 chars' },
+          severity: { type: 'string', enum: ['info', 'caution', 'serious'] },
+        },
+        required: ['flag', 'detail', 'quote', 'severity'],
       },
-      required: ['value', 'quote', 'confidence'],
-    }])
-  ),
-  required: [...EXTRACTION_FIELDS],
+    },
+  },
+  required: [...EXTRACTION_FIELDS, 'structureFlags'],
 };
 
 const SYSTEM = `You extract commercial real estate deal facts from documents for an underwriting pipeline.
 Rules:
 - Only report values explicitly present in the text. Never estimate or infer.
 - If a field is not in the text, return null for it.
+- structureFlags capture DEAL-STRUCTURE red tape that numbers cannot: position type (GP/LP interest vs fee simple), agency or regulatory approvals required (HPD, HUD, lender consent), investor/LP sign-off conditions, pending evictions or litigation, outstanding receivables, deferred or owed developer fees, earnout or seller-financing conditions, regulatory agreements and use restrictions, tax exemptions with expiry, compliance periods. Report each with its specifics and a verbatim quote. Empty array if none.
 - askingPrice is the purchase/asking price, NOT a loan amount. loanRequest is the debt being requested.
 - capexTotal is the total renovation, PIP, or capital improvement budget.
 - occupancy as a decimal (0.52 for 52%). capRate as a decimal (0.0717 for 7.17%).
@@ -53,24 +72,27 @@ export interface LlmExtractionOutcome {
   usage: LlmUsage;
   notes: ExtractedNote[];
   values: Record<string, { value: number | string; confidence: number; rawText: string }>;
+  structureFlags: StructureFlag[];
 }
 
 type FieldHit = { value: number | string; quote: string; confidence: number } | null;
+export interface StructureFlag { flag: string; detail: string; quote: string; severity: 'info' | 'caution' | 'serious' }
 
 async function runExtraction(
   userContent: UserContent,
   sourceId: string,
   already: Record<string, unknown>
 ): Promise<LlmExtractionOutcome> {
-  const { data, usage } = await callJson<Record<string, FieldHit>>(
+  const { data, usage } = await callJson<Record<string, FieldHit> & { structureFlags?: StructureFlag[] }>(
     'extraction',
     SYSTEM,
     userContent,
     'deal_extraction',
     SCHEMA,
-    1500
+    2200
   );
 
+  const structureFlags: StructureFlag[] = Array.isArray(data.structureFlags) ? data.structureFlags : [];
   const values: LlmExtractionOutcome['values'] = {};
   const notes: ExtractedNote[] = [];
   let merged = 0;
@@ -92,7 +114,7 @@ async function runExtraction(
     merged++;
   }
 
-  return { merged, usage, notes, values };
+  return { merged, usage, notes, values, structureFlags };
 }
 
 /** Text-based LLM extraction (documents whose text layer parsed). */

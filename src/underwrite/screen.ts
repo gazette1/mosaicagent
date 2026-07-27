@@ -231,6 +231,26 @@ export function screenDeal(deal: Deal): ScreenResult {
   }
   
   // ============================================================================
+  // Structural complexity flag: serious deal-structure red tape extracted from
+  // the documents (GP transfers, agency approvals, evictions, fee overhangs).
+  // Soft flag: it shapes the verdict without inventing a number.
+  // ============================================================================
+
+  const seriousStructure = (deal.extracted.notes ?? []).filter(
+    n => n.field === 'structureFlag' && /^SERIOUS/i.test(n.extractedValue ?? '')
+  );
+  if (seriousStructure.length > 0) {
+    killFlags.push({
+      criterion: 'Structural Complexity',
+      triggered: true,
+      severity: 'soft',
+      reason: `${seriousStructure.length} serious structure flag(s): ` +
+        seriousStructure.slice(0, 3).map(n => n.extractedValue.replace(/^SERIOUS:\s*/i, '').split(' - ')[0]).join('; '),
+      dataNeededToOverturn: 'Resolution plan per flag (approvals path, eviction status, fee settlement)',
+    });
+  }
+
+  // ============================================================================
   // Determine verdict and risk score
   // ============================================================================
   
@@ -328,6 +348,19 @@ export function screenDeal(deal: Deal): ScreenResult {
     };
   }
   
+  // ============================================================================
+  // Structural escalation: three or more SERIOUS structure flags means the
+  // deal is a structuring exercise, not a clean pursuit. CHASE overstates it.
+  // ============================================================================
+
+  if (verdict === 'CHASE' && seriousStructure.length >= 3) {
+    verdict = 'STRUCTURE';
+    riskScore = Math.max(riskScore, 4);
+    riskScoreRationale = `${seriousStructure.length} serious structure flags (approvals, consents, encumbrances). ` +
+      'Economics may clear but the transaction requires structuring and third-party approvals before it is real. ' +
+      riskScoreRationale;
+  }
+
   // ============================================================================
   // Owner-occupancy override
   //

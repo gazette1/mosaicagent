@@ -28,6 +28,7 @@ import { normalizeRentRoll } from '../ingest/rentroll-normalizer';
 import { normalizeT12, estimateNoiFromRentRoll } from '../ingest/t12-normalizer';
 import { parseBrokerEmail, parseOMText, extractFromText } from '../ingest/text-parser';
 import { extractFromPdf } from '../ingest/pdf-extractor';
+import { extractDocxText } from '../ingest/docx-extractor';
 import { ASSET_TYPE_CRITERIA } from '../core/doctrine';
 import { llmAvailable } from '../llm/client';
 import { extractWithLlm, extractWithOcrPdf, extractWithOcrImage, LlmExtractionOutcome } from '../ingest/llm-extractor';
@@ -123,9 +124,9 @@ program
   .description('Ingest a source file into a deal')
   .requiredOption('-d, --deal <dealId>', 'Deal ID')
   .requiredOption('-f, --file <path>', 'Path to source file')
-  .requiredOption('-k, --kind <kind>', 'Source type (email, om_text, rentroll_csv, t12_csv, pdf, xlsx_model, image)')
+  .requiredOption('-k, --kind <kind>', 'Source type (email, om_text, rentroll_csv, t12_csv, pdf, xlsx_model, image, docx)')
   .action(async (options: { deal: string; file: string; kind: string }) => {
-    const validKinds: Source['kind'][] = ['email', 'om_text', 'rentroll_csv', 't12_csv', 'pdf', 'xlsx_model', 'image', 'manual'];
+    const validKinds: Source['kind'][] = ['email', 'om_text', 'rentroll_csv', 't12_csv', 'pdf', 'xlsx_model', 'image', 'docx', 'manual'];
     
     if (!validKinds.includes(options.kind as Source['kind'])) {
       console.error(`Error: Invalid kind "${options.kind}". Must be one of: ${validKinds.join(', ')}`);
@@ -358,6 +359,21 @@ program
           for (const note of extracted.notes) {
             console.log(`    - ${note.field}: ${note.extractedValue} (confidence: ${note.confidence.toFixed(2)})`);
           }
+          break;
+        }
+
+        case 'docx': {
+          console.log('  Extracting DOCX text...');
+          const text = await extractDocxText(filePath);
+          console.log(`  ✓ ${text.length} chars`);
+          const extracted = extractFromText(text, source.id);
+          if (!deal.extracted.notes) deal.extracted.notes = [];
+          deal.extracted.notes.push(...extracted.notes);
+          applyExtractedValues(deal, extracted.extractedValues, source.id);
+          applyHotelMetrics(deal, extracted.extractedValues, source.id);
+          await maybeLlmAugment(deal, extracted.extractedValues, text, source.id);
+          auditDataExtracted(deal, source.id, 'docx', extracted.notes.length, 0.65);
+          console.log(`  ✓ Extracted ${extracted.notes.length} data points (deterministic)`);
           break;
         }
 
@@ -777,10 +793,14 @@ async function maybeLlmAugment(
   rawText: string,
   sourceId: string
 ): Promise<void> {
+  if (!llmAvailable()) return;
+  // The LLM pass now ALWAYS runs on text documents: numeric gap-fill keeps
+  // its value, but the structure-flag sweep (GP transfers, agency approvals,
+  // evictions, fee overhangs) has no deterministic substitute and the red
+  // tape is usually the story. Nano-tier cost, ~$0.001/doc.
   const found = Object.keys(extractedValues).length;
-  if (found >= 6 || !llmAvailable()) return;
   try {
-    console.log(`  Deterministic extraction thin (${found} fields) - running LLM pass (routed: extraction tier)...`);
+    console.log(`  LLM pass (${found} deterministic fields; gap-fill + structure-flag sweep)...`);
     const out = await extractWithLlm(rawText, sourceId, extractedValues);
     applyLlmOutcome(deal, out, sourceId, 'LLM_EXTRACTION');
   } catch (e) {
@@ -799,6 +819,28 @@ function applyLlmOutcome(
   deal.extracted.notes.push(...out.notes);
   applyExtractedValues(deal, out.values, sourceId);
   applyHotelMetrics(deal, out.values, sourceId);
+  // Structure flags land as notes so every surface (back office, narrative,
+  // screen) sees the red tape alongside the numbers. Deduped by normalized
+  // label: three years of audited financials repeat the same LP covenants.
+  const flagKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').slice(0, 5).join(' ');
+  const existingFlagKeys = new Set(
+    deal.extracted.notes
+      .filter(n => n.field === 'structureFlag')
+      .map(n => flagKey(n.extractedValue.replace(/^[A-Z]+:\s*/, '').split(' - ')[0]))
+  );
+  for (const f of out.structureFlags ?? []) {
+    const key = flagKey(f.flag);
+    if (existingFlagKeys.has(key)) continue;
+    existingFlagKeys.add(key);
+    deal.extracted.notes.push({
+      sourceId,
+      field: 'structureFlag',
+      extractedValue: `${f.severity.toUpperCase()}: ${f.flag} - ${f.detail}`,
+      confidence: f.severity === 'serious' ? 0.85 : f.severity === 'caution' ? 0.7 : 0.6,
+      rawText: `"${(f.quote || '').substring(0, 90)}"`,
+    });
+    console.log(`    ! [${f.severity.toUpperCase()}] ${f.flag}: ${f.detail.substring(0, 80)}`);
+  }
   deal.auditLog.push({
     timestamp: new Date().toISOString(),
     action,

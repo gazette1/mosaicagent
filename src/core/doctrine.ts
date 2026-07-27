@@ -318,6 +318,7 @@ export const SOURCE_PRIORITY: Record<string, number> = {
   'xlsx_model': 3, // Sponsor model workbook
   'om_text': 4, // Offering memorandum
   'pdf': 4, // PDF documents (OM/appraisal/memo tier)
+  'docx': 4, // Word memos and packages (same tier)
   'image': 4, // Image documents via OCR/vision (same trust tier as PDF)
   'email': 5, // Broker email
   'manual': 6, // Manual entry
