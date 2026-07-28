@@ -13,6 +13,19 @@ const { execFileSync } = require('child_process');
 const REPO = path.join(__dirname, '..');
 const CLI = path.join(REPO, 'dist', 'cli', 'index.js');
 const UI = path.join(__dirname, 'demo-ui.html');
+
+// Load .env so DEMO_PASSCODE set there takes effect without shell exports
+// (critical when the server is exposed through a tunnel)
+try {
+  const envPath = path.join(REPO, '.env');
+  if (fs.existsSync(envPath)) {
+    for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
+      const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
+      if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim();
+    }
+  }
+} catch { /* fall through; explicit env still works */ }
+
 const PORT = Number(process.env.PORT || 8787);
 // Public deployments MUST set DEMO_PASSCODE; without it anyone can spend the
 // OpenAI key. Locally (no passcode set) everything is open.
