@@ -150,27 +150,45 @@
     $('screenBtn').disabled = $('wbBtn').disabled = $('narBtn').disabled = $('memoBtn').disabled = false;
   }
 
+  async function pollJob(key, label, btn) {
+    for (let i = 0; i < 120; i++) {
+      await new Promise(r => setTimeout(r, 5000));
+      const j = await fetch('/api/back/job?key=' + encodeURIComponent(key)).then(r => r.json());
+      if (j.status === 'done') return j.url;
+      if (j.status === 'error') throw new Error(j.error || 'job failed');
+      if (btn) btn.textContent = label + ' (' + ((i + 1) * 5) + 's)...';
+    }
+    throw new Error('timed out');
+  }
+
   $('screenBtn').addEventListener('click', autoScreen);
   $('wbBtn').addEventListener('click', async () => {
     $('wbBtn').disabled = true;
-    const j = await api('/api/back/workbook', { dealId });
-    $('wbBtn').disabled = false;
-    if (j.workbookUrl) window.location = j.workbookUrl;
+    try {
+      const j = await api('/api/back/workbook', { dealId });
+      const url = await pollJob(j.jobKey, 'Building model', $('wbBtn'));
+      window.location = url;
+    } catch (e) { alert('Workbook failed: ' + e.message); }
+    $('wbBtn').disabled = false; $('wbBtn').textContent = 'Workbook (XLSX)';
   });
   $('memoBtn').addEventListener('click', async () => {
     $('memoBtn').disabled = true; $('memoBtn').textContent = 'Drafting...';
-    const j = await api('/api/back/memo', { dealId });
+    try {
+      const j = await api('/api/back/memo', { dealId });
+      const url = await pollJob(j.jobKey, 'Drafting memo', $('memoBtn'));
+      window.open(url, '_blank');
+    } catch (e) { alert('Memo failed: ' + e.message); }
     $('memoBtn').disabled = false; $('memoBtn').textContent = 'Underwriting memo';
-    if (j.snapshot) renderSnapshot(j.snapshot);
-    if (j.memoUrl) window.open(j.memoUrl, '_blank');
   });
 
   $('narBtn').addEventListener('click', async () => {
     $('narBtn').disabled = true; $('narBtn').textContent = 'Drafting...';
-    const j = await api('/api/back/narrative', { dealId });
+    try {
+      const j = await api('/api/back/narrative', { dealId });
+      const url = await pollJob(j.jobKey, 'Drafting narrative', $('narBtn'));
+      window.open(url, '_blank');
+    } catch (e) { alert('Narrative failed: ' + e.message); }
     $('narBtn').disabled = false; $('narBtn').textContent = 'Draft narrative';
-    if (j.snapshot) renderSnapshot(j.snapshot);
-    if (j.narrativeUrl) window.open(j.narrativeUrl, '_blank');
   });
 
   function renderSnapshot(s) {

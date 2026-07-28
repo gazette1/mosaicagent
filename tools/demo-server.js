@@ -8,7 +8,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execFileSync } = require('child_process');
+const { execFileSync, execFile } = require('child_process');
 
 const REPO = path.join(__dirname, '..');
 const CLI = path.join(REPO, 'dist', 'cli', 'index.js');
@@ -52,6 +52,19 @@ function kindFor(filename) {
 
 function run(args) {
   return execFileSync('node', [CLI, ...args], { cwd: REPO, encoding: 'utf-8', timeout: 300000 });
+}
+
+// Async jobs for slow generations (K3 memo/model): tunnels and proxies kill
+// requests at ~100s, so slow work starts instantly and the page polls.
+const jobs = {};
+function startJob(key, args, doneUrl) {
+  if (jobs[key] && jobs[key].status === 'running') return;
+  jobs[key] = { status: 'running', startedAt: Date.now() };
+  execFile('node', [CLI, ...args], { cwd: REPO, timeout: 600000 }, (err) => {
+    jobs[key] = err
+      ? { status: 'error', error: String(err.message || err).substring(0, 200) }
+      : { status: 'done', url: doneUrl };
+  });
 }
 
 function json(res, code, obj) {
@@ -222,11 +235,9 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'POST' && req.url === '/api/back/workbook') {
     readJson(req, res, 1024 * 1024, ({ dealId }) => {
-      try {
-        const clean = dealId.replace(/[^a-z0-9-]/g, '');
-        run(['workbook', '--deal', clean]);
-        json(res, 200, { workbookUrl: `/api/workbook/${clean}`, snapshot: dealSnapshot(dealId) });
-      } catch (e) { json(res, 500, { error: (e.message || 'failed').substring(0, 200) }); }
+      const clean = dealId.replace(/[^a-z0-9-]/g, '');
+      startJob(`workbook:${clean}`, ['workbook', '--deal', clean], `/api/workbook/${clean}`);
+      json(res, 200, { started: true, jobKey: `workbook:${clean}` });
     });
     return;
   }
@@ -242,22 +253,25 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'POST' && req.url === '/api/back/memo') {
     readJson(req, res, 1024 * 1024, ({ dealId }) => {
-      try {
-        const clean = dealId.replace(/[^a-z0-9-]/g, '');
-        run(['memo', '--deal', clean]);
-        json(res, 200, { memoUrl: `/api/memo/${clean}`, snapshot: dealSnapshot(dealId) });
-      } catch (e) { json(res, 500, { error: (e.message || 'failed').substring(0, 200) }); }
+      const clean = dealId.replace(/[^a-z0-9-]/g, '');
+      startJob(`memo:${clean}`, ['memo', '--deal', clean], `/api/memo/${clean}`);
+      json(res, 200, { started: true, jobKey: `memo:${clean}` });
     });
+    return;
+  }
+
+  if (req.method === 'GET' && req.url.startsWith('/api/back/job')) {
+    const u = new URL(req.url, 'http://x');
+    const key = (u.searchParams.get('key') || '').substring(0, 120);
+    json(res, 200, jobs[key] || { status: 'unknown' });
     return;
   }
 
   if (req.method === 'POST' && req.url === '/api/back/narrative') {
     readJson(req, res, 1024 * 1024, ({ dealId }) => {
-      try {
-        const clean = dealId.replace(/[^a-z0-9-]/g, '');
-        run(['narrative', '--deal', clean]);
-        json(res, 200, { narrativeUrl: `/api/narrative/${clean}`, snapshot: dealSnapshot(dealId) });
-      } catch (e) { json(res, 500, { error: (e.message || 'failed').substring(0, 200) }); }
+      const clean = dealId.replace(/[^a-z0-9-]/g, '');
+      startJob(`narrative:${clean}`, ['narrative', '--deal', clean], `/api/narrative/${clean}`);
+      json(res, 200, { started: true, jobKey: `narrative:${clean}` });
     });
     return;
   }
