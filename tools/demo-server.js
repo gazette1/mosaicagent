@@ -133,7 +133,7 @@ const server = http.createServer((req, res) => {
   // the passcode, not the origin, is the gate
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-demo-key');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-demo-key, x-pass');
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
     res.end();
