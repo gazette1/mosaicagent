@@ -57,13 +57,29 @@ function run(args) {
 // Async jobs for slow generations (K3 memo/model): tunnels and proxies kill
 // requests at ~100s, so slow work starts instantly and the page polls.
 const jobs = {};
-function startJob(key, args, doneUrl) {
+const JOB_CAP = 200;
+function startJob(key, args, onDone, cleanupDir) {
   if (jobs[key] && jobs[key].status === 'running') return;
+  // Bound memory on long demo sessions
+  const keys = Object.keys(jobs);
+  if (keys.length > JOB_CAP) {
+    for (const k of keys.slice(0, keys.length - JOB_CAP)) delete jobs[k];
+  }
   jobs[key] = { status: 'running', startedAt: Date.now() };
-  execFile('node', [CLI, ...args], { cwd: REPO, timeout: 600000 }, (err) => {
-    jobs[key] = err
-      ? { status: 'error', error: String(err.message || err).substring(0, 200) }
-      : { status: 'done', url: doneUrl };
+  execFile('node', [CLI, ...args], { cwd: REPO, timeout: 900000, maxBuffer: 20 * 1024 * 1024 }, (err, stdout, stderr) => {
+    if (cleanupDir) { try { fs.rmSync(cleanupDir, { recursive: true, force: true }); } catch { /* best effort */ } }
+    if (err) {
+      // Surface the CLI's own error line when there is one: far more useful
+      // than "Command failed with exit code 1"
+      const detail = String(stderr || stdout || '').split(String.fromCharCode(10)).filter(l => /error|Error|failed/i.test(l)).slice(-1)[0];
+      jobs[key] = { status: 'error', error: (detail || String(err.message || err)).substring(0, 300) };
+      return;
+    }
+    try {
+      jobs[key] = { status: 'done', ...(typeof onDone === 'function' ? onDone(stdout || '') : { url: onDone }) };
+    } catch (e) {
+      jobs[key] = { status: 'error', error: String(e.message || e).substring(0, 200) };
+    }
   });
 }
 
@@ -74,15 +90,38 @@ function json(res, code, obj) {
 
 function readJson(req, res, maxBytes, cb) {
   let body = '';
+  let killed = false;
   req.setEncoding('utf-8');
   req.on('data', d => {
+    if (killed) return;
     body += d;
-    if (body.length > maxBytes) req.destroy();
+    if (body.length > maxBytes) {
+      // Clean 413 beats a destroyed socket, which the browser reports as the
+      // uninformative "Failed to fetch"
+      killed = true;
+      json(res, 413, { error: `payload too large (limit ${Math.round(maxBytes / 1e6)}MB base64)` });
+      req.destroy();
+    }
   });
   req.on('end', () => {
+    if (killed) return;
     try { cb(JSON.parse(body)); }
     catch (e) { json(res, 400, { error: 'bad json: ' + (e.message || '').substring(0, 120) }); }
   });
+  req.on('error', () => { killed = true; });
+}
+
+/** Refuse generation on a deal with nothing to model: a clear message beats
+ *  burning two minutes of K3 to produce an empty document. */
+function generationGuard(dealId) {
+  const p = path.join(REPO, 'deals', dealId, 'deal.json');
+  if (!fs.existsSync(p)) return 'deal not found (open a deal room first)';
+  try {
+    const d = JSON.parse(fs.readFileSync(p, 'utf-8'));
+    const n = (d.extracted?.notes || []).length;
+    if (n === 0) return 'nothing extracted yet: ingest at least one document first';
+  } catch { return 'deal file unreadable'; }
+  return null;
 }
 
 /** Distilled view of a deal for the back-office numbers board. */
@@ -204,21 +243,27 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url === '/api/back/ingest') {
     readJson(req, res, 200 * 1024 * 1024, ({ dealId, file }) => {
       try {
-        if (!dealId || !file?.name || !file?.b64) return json(res, 400, { error: 'dealId and file{name,b64} required' });
+        if (!dealId || !file?.name || !file?.b64) return json(res, 400, { error: 'dealId and non-empty file{name,b64} required' });
+        const clean = String(dealId).replace(/[^a-z0-9-]/g, '');
+        if (!fs.existsSync(path.join(REPO, 'deals', clean, 'deal.json'))) {
+          return json(res, 400, { error: 'deal not found (open a deal room first)' });
+        }
         const kind = kindFor(file.name);
-        if (!kind) return json(res, 200, { skipped: true, reason: 'unsupported type (docx pending)', snapshot: dealSnapshot(dealId) });
+        if (!kind) return json(res, 200, { skipped: true, reason: 'unsupported type', snapshot: dealSnapshot(clean) });
         const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mosaic-back-'));
         const safe = path.join(tmp, path.basename(file.name).replace(/[^\w.\- ]/g, '_'));
         fs.writeFileSync(safe, Buffer.from(file.b64, 'base64'));
-        const out = run(['ingest', '--deal', dealId.replace(/[^a-z0-9-]/g, ''), '--file', safe, '--kind', kind]);
-        json(res, 200, {
+        // Async: OCR on a 200-page appraisal outruns any proxy timeout
+        const jobKey = `ingest:${clean}:${Date.now()}`;
+        startJob(jobKey, ['ingest', '--deal', clean, '--file', safe, '--kind', kind], (out) => ({
           kind,
           fields: Number((out.match(/Extracted (\d+)/) || [])[1] ?? 0),
           llmPass: out.includes('LLM added'),
           ocrPass: out.includes('OCR added'),
-          snapshot: dealSnapshot(dealId),
-        });
-      } catch (e) { json(res, 500, { error: (e.message || 'failed').substring(0, 200), snapshot: dealId ? dealSnapshot(dealId) : null }); }
+          snapshot: dealSnapshot(clean),
+        }), tmp);
+        json(res, 200, { started: true, jobKey, kind });
+      } catch (e) { json(res, 500, { error: (e.message || 'failed').substring(0, 200) }); }
     });
     return;
   }
@@ -235,8 +280,10 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'POST' && req.url === '/api/back/workbook') {
     readJson(req, res, 1024 * 1024, ({ dealId }) => {
-      const clean = dealId.replace(/[^a-z0-9-]/g, '');
-      startJob(`workbook:${clean}`, ['workbook', '--deal', clean], `/api/workbook/${clean}`);
+      const clean = String(dealId || '').replace(/[^a-z0-9-]/g, '');
+      const guard = generationGuard(clean);
+      if (guard) return json(res, 400, { error: guard });
+      startJob(`workbook:${clean}`, ['workbook', '--deal', clean], () => ({ url: `/api/workbook/${clean}` }));
       json(res, 200, { started: true, jobKey: `workbook:${clean}` });
     });
     return;
@@ -253,8 +300,10 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'POST' && req.url === '/api/back/memo') {
     readJson(req, res, 1024 * 1024, ({ dealId }) => {
-      const clean = dealId.replace(/[^a-z0-9-]/g, '');
-      startJob(`memo:${clean}`, ['memo', '--deal', clean], `/api/memo/${clean}`);
+      const clean = String(dealId || '').replace(/[^a-z0-9-]/g, '');
+      const guard = generationGuard(clean);
+      if (guard) return json(res, 400, { error: guard });
+      startJob(`memo:${clean}`, ['memo', '--deal', clean], () => ({ url: `/api/memo/${clean}` }));
       json(res, 200, { started: true, jobKey: `memo:${clean}` });
     });
     return;
@@ -280,8 +329,10 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'POST' && req.url === '/api/back/narrative') {
     readJson(req, res, 1024 * 1024, ({ dealId }) => {
-      const clean = dealId.replace(/[^a-z0-9-]/g, '');
-      startJob(`narrative:${clean}`, ['narrative', '--deal', clean], `/api/narrative/${clean}`);
+      const clean = String(dealId || '').replace(/[^a-z0-9-]/g, '');
+      const guard = generationGuard(clean);
+      if (guard) return json(res, 400, { error: guard });
+      startJob(`narrative:${clean}`, ['narrative', '--deal', clean], () => ({ url: `/api/narrative/${clean}` }));
       json(res, 200, { started: true, jobKey: `narrative:${clean}` });
     });
     return;

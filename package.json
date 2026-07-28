@@ -13,7 +13,8 @@
     "clean": "rm -rf dist",
     "rebuild": "npm run clean && npm run build",
     "test": "npm run build && node --test dist/tests/tools.test.js",
-    "eval": "npm run build && node eval/run-evals.js"
+    "eval": "npm run build && node eval/run-evals.js",
+    "demo": "node tools/demo-up.js"
   },
   "keywords": [
     "real-estate",

@@ -133,10 +133,13 @@
       if (j.error) { st.textContent = 'error'; st.className = 'st err'; item.li.title = j.error; }
       else if (j.skipped) { st.textContent = 'skipped'; st.className = 'st skip'; item.li.title = j.reason; }
       else {
-        const extra = j.ocrPass ? ' +OCR' : j.llmPass ? ' +LLM' : '';
-        st.textContent = `${j.kind}${extra}`; st.className = 'st done';
+        // Async: poll until the CLI finishes (OCR on a big PDF takes minutes)
+        st.textContent = j.kind + ' 0s';
+        const done = await pollIngest(j.jobKey, j.kind, st);
+        const extra = done.ocrPass ? ' +OCR' : done.llmPass ? ' +LLM' : '';
+        st.textContent = `${j.kind}${extra} +${done.fields ?? 0}f`; st.className = 'st done';
+        if (done.snapshot) renderSnapshot(done.snapshot);
       }
-      if (j.snapshot) renderSnapshot(j.snapshot);
     } catch (e) { st.textContent = 'error'; st.className = 'st err'; item.li.title = e.message; }
     item.done = true;
     busy = false;
@@ -150,15 +153,35 @@
     $('screenBtn').disabled = $('wbBtn').disabled = $('narBtn').disabled = $('memoBtn').disabled = false;
   }
 
-  async function pollJob(key, label, btn) {
-    for (let i = 0; i < 120; i++) {
-      await new Promise(r => setTimeout(r, 5000));
-      const j = await fetch('/api/back/job?key=' + encodeURIComponent(key)).then(r => r.json());
-      if (j.status === 'done') return j.url;
+  // Poll resilience: a single transient fetch failure must not kill a job that
+  // is still running server-side. Tolerate consecutive misses before giving up.
+  async function pollUntil(url, label, st, stepSec) {
+    let misses = 0;
+    for (let i = 0; i < 240; i++) {
+      await new Promise(r => setTimeout(r, stepSec * 1000));
+      let j;
+      try {
+        j = await fetch(url).then(r => r.json());
+        misses = 0;
+      } catch (e) {
+        if (++misses >= 5) throw new Error('lost contact with the backend (is the server or tunnel still up?)');
+        if (st) st.textContent = label + ' reconnecting...';
+        continue;
+      }
+      if (j.status === 'done') return j;
       if (j.status === 'error') throw new Error(j.error || 'job failed');
-      if (btn) btn.textContent = label + ' (' + ((i + 1) * 5) + 's)...';
+      if (j.status === 'unknown' && ++misses >= 5) throw new Error('job vanished (server restarted mid-run)');
+      if (st) st.textContent = label + ' ' + ((i + 1) * stepSec) + 's';
     }
-    throw new Error('timed out');
+    throw new Error('timed out after 12 minutes');
+  }
+
+  async function pollIngest(key, kind, st) {
+    return pollUntil('/api/back/job?key=' + encodeURIComponent(key), kind, st, 3);
+  }
+
+  async function pollJob(key, label, btn) {
+    return (await pollUntil('/api/back/job?key=' + encodeURIComponent(key), label, btn, 5)).url;
   }
 
   $('screenBtn').addEventListener('click', autoScreen);
