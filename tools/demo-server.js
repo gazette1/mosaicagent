@@ -263,7 +263,18 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url.startsWith('/api/back/job')) {
     const u = new URL(req.url, 'http://x');
     const key = (u.searchParams.get('key') || '').substring(0, 120);
-    json(res, 200, jobs[key] || { status: 'unknown' });
+    if (jobs[key]) return json(res, 200, jobs[key]);
+    // Restart resilience: the in-memory map is gone but the artifact may be
+    // on disk. kind:dealId -> output file check.
+    const m = key.match(/^(memo|workbook|narrative):([a-z0-9-]+)$/);
+    if (m) {
+      const files = { memo: ['memo.html', '/api/memo/'], workbook: ['package.xlsx', '/api/workbook/'], narrative: ['narrative.html', '/api/narrative/'] };
+      const [file, urlBase] = files[m[1]];
+      if (fs.existsSync(path.join(REPO, 'deals', m[2], 'outputs', file))) {
+        return json(res, 200, { status: 'done', url: urlBase + m[2] });
+      }
+    }
+    json(res, 200, { status: 'unknown' });
     return;
   }
 
