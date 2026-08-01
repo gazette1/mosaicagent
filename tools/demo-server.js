@@ -156,6 +156,32 @@ function dealSnapshot(dealId) {
       quote: (n.rawText || '').substring(0, 100),
     })),
     estLlmCostUsd: +llmCost.toFixed(4),
+    conflicts: (deal.extracted?.conflicts || []).map(c => ({
+      field: c.field, severity: c.severity, spreadPct: c.spreadPct, message: c.message,
+      claims: (c.claims || []).map(x => ({ value: x.value, docClass: x.docClass, filename: x.filename })),
+    })),
+    injections: (deal.extracted?.injections || []).map(i => ({ filename: i.filename, pattern: i.pattern })),
+    provenance: (() => {
+      // Winner per field with the losers it beat: what the analyst needs to see
+      const claims = deal.extracted?.claims || [];
+      const byField = {};
+      for (const c of claims) (byField[c.field] = byField[c.field] || []).push(c);
+      return Object.entries(byField).map(([field, list]) => {
+        const sorted = [...list].sort((a, b) =>
+          b.authority - a.authority ||
+          (a.derived ? 1 : 0) - (b.derived ? 1 : 0) ||
+          String(b.docDate || '').localeCompare(String(a.docDate || '')) ||
+          b.confidence - a.confidence);
+        return {
+          field,
+          value: sorted[0].value,
+          docClass: sorted[0].docClass,
+          authority: sorted[0].authority,
+          filename: sorted[0].filename,
+          beat: sorted.slice(1).map(c => ({ value: c.value, docClass: c.docClass, authority: c.authority })),
+        };
+      });
+    })(),
     screen: screen ? {
       verdict: screen.verdict,
       riskScore: screen.riskScore,
@@ -406,6 +432,32 @@ const server = http.createServer((req, res) => {
           ),
           extracted: (deal.extracted.notes || []).map(n => ({ field: n.field, value: n.extractedValue, confidence: n.confidence })),
           estLlmCostUsd: +llmCost.toFixed(4),
+    conflicts: (deal.extracted?.conflicts || []).map(c => ({
+      field: c.field, severity: c.severity, spreadPct: c.spreadPct, message: c.message,
+      claims: (c.claims || []).map(x => ({ value: x.value, docClass: x.docClass, filename: x.filename })),
+    })),
+    injections: (deal.extracted?.injections || []).map(i => ({ filename: i.filename, pattern: i.pattern })),
+    provenance: (() => {
+      // Winner per field with the losers it beat: what the analyst needs to see
+      const claims = deal.extracted?.claims || [];
+      const byField = {};
+      for (const c of claims) (byField[c.field] = byField[c.field] || []).push(c);
+      return Object.entries(byField).map(([field, list]) => {
+        const sorted = [...list].sort((a, b) =>
+          b.authority - a.authority ||
+          (a.derived ? 1 : 0) - (b.derived ? 1 : 0) ||
+          String(b.docDate || '').localeCompare(String(a.docDate || '')) ||
+          b.confidence - a.confidence);
+        return {
+          field,
+          value: sorted[0].value,
+          docClass: sorted[0].docClass,
+          authority: sorted[0].authority,
+          filename: sorted[0].filename,
+          beat: sorted.slice(1).map(c => ({ value: c.value, docClass: c.docClass, authority: c.authority })),
+        };
+      });
+    })(),
           workbookUrl: `/api/workbook/${dealId}`,
           narrativeUrl: narrative ? `/api/narrative/${dealId}` : null,
         });

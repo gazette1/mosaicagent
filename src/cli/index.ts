@@ -948,8 +948,15 @@ function recordClaims(
     winners[field] = { value: r.winner.value, confidence: r.winner.confidence, rawText: `[${r.winner.docClass}] ${r.winner.quote}` };
   }
   applyResolvedFacts(deal, winners, resolutions);
+  // Announce only conflicts new to this document, not the standing list on
+  // every ingest
   if (conflicts.length) {
+    const holder = deal as unknown as { __seenConflicts?: Set<string> };
+    holder.__seenConflicts ??= new Set<string>();
     for (const c of conflicts.filter(x => x.severity === 'material')) {
+      const k = `${c.field}:${c.spreadPct}`;
+      if (holder.__seenConflicts.has(k)) continue;
+      holder.__seenConflicts.add(k);
       console.log(`    ! CONFLICT ${c.message}`);
     }
   }

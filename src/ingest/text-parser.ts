@@ -83,10 +83,13 @@ const EXTRACTION_PATTERNS: ExtractionPattern[] = [
   {
     field: 'occupancy',
     patterns: [
-      /(?:occupancy|occupied)[\s:]*(\d+(?:\.\d+)?)\s*%/i,
-      /occupancy\s*\([^)]{0,30}\)\s*:?\s*(\d+(?:\.\d+)?)\s*%/i, // "Occupancy (Trailing 12): 52%"
-      /occupancy[^%\d\n]{0,24}(\d+(?:\.\d+)?)\s*%/i,
-      /(\d+(?:\.\d+)?)\s*%\s*(?:occupied|leased|occupancy)/i,
+      // "Occupancy Growth (Annual), 3.0%" is a growth RATE, not an occupancy.
+      // Found on a real sponsor model: 3% was landing in the occupancy field
+      // and producing a phantom 95% conflict against the appraisal's 57%.
+      /(?:occupancy|occupied)(?!\s*(?:growth|change|delta|increase|ramp))[\s:]*(\d+(?:\.\d+)?)\s*%/i,
+      /occupancy\s*\((?![^)]*growth)[^)]{0,30}\)\s*:?\s*(\d+(?:\.\d+)?)\s*%/i,
+      /occupancy(?!\s*(?:growth|change|delta|increase|ramp))[^%\d\n]{0,24}(\d+(?:\.\d+)?)\s*%/i,
+      /(\d+(?:\.\d+)?)\s*%\s*(?:occupied|leased|occupancy)(?!\s*growth)/i,
     ],
     valueType: 'percent',
     confidence: 0.7,
@@ -216,7 +219,7 @@ const SANITY_RANGES: Record<string, [number, number]> = {
   askingPrice: [250_000, 5_000_000_000],
   noi: [25_000, 500_000_000],
   capRate: [0.005, 0.25],
-  occupancy: [0.01, 1.0],
+  occupancy: [0.15, 1.0], // below 15% is almost always a growth rate mislabeled
   adr: [30, 2_500],
   revpar: [5, 2_000],
   keys: [10, 2_500],

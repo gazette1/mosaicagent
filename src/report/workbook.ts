@@ -520,6 +520,16 @@ export async function buildDealWorkbook(deal: Deal, outDir: string, design?: Arc
     fillCell(r.getCell(2), VERDICT_COLORS[v] ?? WARN);
     r.getCell(2).font = { bold: true, color: { argb: WHITE } };
   }
+  const claimCount = (deal.extracted.claims ?? []).length;
+  const conflictCount = (deal.extracted.conflicts ?? []).length;
+  if (claimCount) {
+    ex.addRow(['Claims adjudicated', `${claimCount} from ${new Set((deal.extracted.claims ?? []).map(c => c.filename)).size} documents`, conflictCount ? `${conflictCount} unresolved disagreement(s): see Provenance` : 'no material disagreements']);
+  }
+  const injCount = (deal.extracted.injections ?? []).length;
+  if (injCount) {
+    const r = ex.addRow(['Document integrity', `${injCount} injection attempt(s)`, 'content ignored as data; see Audit']);
+    fillCell(r.getCell(2), BAD); r.getCell(2).font = { bold: true, color: { argb: WHITE } };
+  }
   const sfCount = notes.filter(n => n.field === 'structureFlag').length;
   const sfSerious = notes.filter(n => n.field === 'structureFlag' && /^SERIOUS/.test(n.extractedValue)).length;
   ex.addRow(['Structure Flags', `${sfCount} (${sfSerious} serious)`, 'full list on Audit sheet']);
@@ -534,6 +544,72 @@ export async function buildDealWorkbook(deal: Deal, outDir: string, design?: Arc
   dscrConditional(ex, 'B10');
   boxTable(ex, 4, ex.rowCount, 3, false);
   wrapCol(ex, [3], 4, ex.rowCount);
+
+  // ==========================================================================
+  // PROVENANCE: the claims ledger, and why each winner won. This is the sheet
+  // that shows the system adjudicating sources rather than scraping them.
+  // ==========================================================================
+  const claims = (deal.extracted.claims ?? []) as { field: string; value: number | string; confidence: number; quote: string; filename: string; docClass: string; authority: number; docDate: string | null; extractor: string; derived?: boolean }[];
+  let pv: Ws | null = null;
+  if (claims.length) {
+    pv = wb.addWorksheet('Provenance');
+    pv.columns = [{ width: 16 }, { width: 16 }, { width: 20 }, { width: 9 }, { width: 11 }, { width: 7 }, { width: 30 }, { width: 40 }];
+    pv.addRow(['CLAIMS LEDGER: every value any document asserted, and who won']).font = { bold: true, size: 12, color: { argb: NAVY } };
+    pv.addRow(['Resolution order: document authority, then stated-over-derived, then amendment, then date, then read confidence.']).font = { color: { argb: 'FF6B7A8C' } };
+    const ph = pv.addRow(['Field', 'Value', 'Document class', 'Authority', 'Date', 'Conf', 'Source file', 'Evidence']);
+    bandRow(pv, ph.number, 8);
+
+    // Winner per field, by the same rule the resolver used
+    const byField = new Map<string, typeof claims>();
+    for (const c of claims) {
+      if (!byField.has(c.field)) byField.set(c.field, []);
+      byField.get(c.field)!.push(c);
+    }
+    const first = ph.number + 1;
+    for (const [field, list] of [...byField.entries()].sort()) {
+      const sorted = [...list].sort((a, b) =>
+        b.authority - a.authority ||
+        (a.derived ? 1 : 0) - (b.derived ? 1 : 0) ||
+        String(b.docDate ?? '').localeCompare(String(a.docDate ?? '')) ||
+        b.confidence - a.confidence);
+      sorted.forEach((c, i) => {
+        const r = pv!.addRow([
+          i === 0 ? field : '',
+          typeof c.value === 'number' ? c.value : String(c.value).substring(0, 40),
+          c.docClass + (c.derived ? ' (derived)' : ''),
+          c.authority,
+          c.docDate ?? '',
+          c.confidence,
+          c.filename,
+          String(c.quote ?? '').substring(0, 160),
+        ]);
+        if (i === 0) {
+          fillCell(r.getCell(1), GOOD); r.getCell(1).font = { bold: true, color: { argb: WHITE } };
+          fillCell(r.getCell(2), 'FFE8F3E9');
+        } else {
+          r.font = { color: { argb: 'FF8A8A8A' }, strike: true };
+        }
+        if (typeof c.value === 'number' && Math.abs(c.value) >= 1000) r.getCell(2).numFmt = MONEY;
+        wrapCol(pv!, [7, 8], r.number, r.number);
+      });
+    }
+    boxTable(pv, first, pv.rowCount, 8, false);
+    pv.views = [{ state: 'frozen', ySplit: ph.number }];
+
+    // Conflicts: the most valuable rows in the workbook
+    const conflicts = deal.extracted.conflicts ?? [];
+    if (conflicts.length) {
+      pv.addRow([]);
+      const ch = pv.addRow(['SOURCE DISAGREEMENTS REQUIRING HUMAN ADJUDICATION']);
+      bandRow(pv, ch.number, 8, BAD);
+      for (const c of conflicts) {
+        const r = pv.addRow([c.severity.toUpperCase(), c.field, `${c.spreadPct ?? ''}% spread`, '', '', '', c.message, c.claims.map(x => `${x.value} (${x.docClass})`).join('  vs  ')]);
+        fillCell(r.getCell(1), c.severity === 'material' ? BAD : WARN);
+        r.getCell(1).font = { bold: true, color: { argb: WHITE } };
+        wrapCol(pv, [7, 8], r.number, r.number);
+      }
+    }
+  }
 
   // ==========================================================================
   // AUDIT
@@ -568,11 +644,13 @@ export async function buildDealWorkbook(deal: Deal, outDir: string, design?: Arc
   ex.orderNo = 0; as.orderNo = 1; su.orderNo = 2; dz.orderNo = 3; pf.orderNo = 4;
   st.orderNo = 5; sn.orderNo = 6; sc.orderNo = 7; mc.orderNo = 8;
   if (ob) ob.orderNo = 9;
-  au.orderNo = 10;
+  if (pv) pv.orderNo = 10;
+  au.orderNo = 11;
   const tab = (ws: Ws, argb: string) => (ws.properties.tabColor = { argb });
   tab(ex, NAVY_DARK); tab(as, WARN); tab(su, NAVY); tab(dz, NAVY_DARK); tab(pf, NAVY);
   tab(st, NAVY); tab(sn, 'FF8A8A8A'); tab(sc, GOOD); tab(mc, WARN); tab(au, 'FF8A8A8A');
   if (ob) tab(ob, BAD);
+  if (pv) tab(pv, GOOD);
 
   const outPath = path.join(outDir, 'package.xlsx');
   await wb.xlsx.writeFile(outPath);

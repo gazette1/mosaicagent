@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-08-01T01:49:45.851Z",
+  "timestamp": "2026-08-01T02:05:41.453Z",
   "production": "openai:gpt-5.4-nano",
   "candidate": "deepseek:deepseek-v4-pro",
   "agreementRate": 0.625,
@@ -156,7 +156,7 @@
       },
       "cand": {
         "model": "deepseek:deepseek-v4-pro",
-        "ms": 2,
+        "ms": 1,
         "cost": 0
       }
     }

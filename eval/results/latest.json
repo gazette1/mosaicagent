@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-08-01T01:52:50.775Z",
-  "commit": "a4b86ed",
+  "timestamp": "2026-08-01T02:05:25.183Z",
+  "commit": "14418cd",
   "overall": 1,
   "cases": [
     {
@@ -129,14 +129,14 @@
     }
   ],
   "regression": {
-    "prevCommit": "a4b86ed",
-    "prevOverall": 0.978,
-    "delta": 0.022,
+    "prevCommit": "14418cd",
+    "prevOverall": 1,
+    "delta": 0,
     "regressed": false,
     "perCase": [
       {
         "name": "industrial-samples",
-        "delta": 0.045
+        "delta": 0
       },
       {
         "name": "sandcastle-hotel",

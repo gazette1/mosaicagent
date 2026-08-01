@@ -1,21 +1,21 @@
 {
-  "timestamp": "2026-08-01T01:49:45.860Z",
+  "timestamp": "2026-08-01T02:05:41.460Z",
   "results": [
     {
       "id": 5,
       "name": "tool unit tests",
       "kind": "offline",
       "status": "pass",
-      "detail": "ℹ duration_ms 110.5964",
+      "detail": "ℹ duration_ms 107.1262",
       "secs": "3"
     },
     {
       "id": 1,
       "name": "golden set",
       "kind": "offline",
-      "status": "fail",
-      "detail": "Regression vs f377931: delta -0.045 REGRESSED",
-      "secs": "15"
+      "status": "pass",
+      "detail": "Regression vs 14418cd: delta +0 ok",
+      "secs": "6"
     },
     {
       "id": 10,
@@ -23,7 +23,7 @@
       "kind": "offline",
       "status": "pass",
       "detail": "Report: C:\\Real Estate\\mosaic-underwriting\\eval\\results\\redteam-latest.json",
-      "secs": "7"
+      "secs": "6"
     },
     {
       "id": 2,
@@ -31,7 +31,7 @@
       "kind": "offline",
       "status": "pass",
       "detail": "Calibration queue: eval/results/human-calibration.jsonl (fill humanReview to grade the judge)",
-      "secs": "28"
+      "secs": "10"
     },
     {
       "id": 9,
