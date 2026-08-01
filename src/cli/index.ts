@@ -30,7 +30,9 @@ import { parseBrokerEmail, parseOMText, extractFromText } from '../ingest/text-p
 import { extractFromPdf } from '../ingest/pdf-extractor';
 import { extractDocxText } from '../ingest/docx-extractor';
 import { ASSET_TYPE_CRITERIA } from '../core/doctrine';
-import { llmAvailable } from '../llm/client';
+import { llmAvailable, setDealContext } from '../llm/client';
+import { classifyDocument, extractDocDate, amendmentRank, makeClaim, resolveLedger, AUTHORITY, Claim } from '../core/claims';
+import { scanForInjection } from '../llm/gateway';
 import { extractWithLlm, extractWithOcrPdf, extractWithOcrImage, LlmExtractionOutcome } from '../ingest/llm-extractor';
 import { generateNarrative } from '../report/narrative';
 import { screenDeal } from '../underwrite/screen';
@@ -160,6 +162,24 @@ program
       console.log(`✓ Added source: ${source.id}`);
       console.log(`  Kind: ${kind}`);
       console.log(`  File: ${filename}`);
+
+      // Document provenance: who is this, and how much should we believe it?
+      // Deterministic by design. This decides authority, so it must never be a
+      // model call the document itself could argue with.
+      let sampleText = '';
+      try {
+        if (/\.(md|txt|csv)$/i.test(filename)) sampleText = fs.readFileSync(copiedPath, 'utf-8').substring(0, 4000);
+      } catch { /* sampling is best-effort */ }
+      const cls = classifyDocument(filename, sampleText);
+      const docMeta = {
+        sourceId: source.id,
+        filename,
+        docClass: cls.docClass,
+        docDate: extractDocDate(filename, sampleText),
+        amendmentRank: amendmentRank(filename),
+      };
+      console.log(`  Authority: ${cls.docClass} (${AUTHORITY[cls.docClass] ?? 10})${docMeta.docDate ? ', dated ' + docMeta.docDate : ''}${docMeta.amendmentRank ? ', amendment #' + docMeta.amendmentRank : ''} - ${cls.why}`);
+      setDealContext(deal.dealId);
       
       // Parse based on kind
       const filePath = copiedPath;
@@ -219,6 +239,8 @@ program
               `Estimated from rent roll using ${deal.assetType} expense ratio`
             );
             
+            recordClaims(deal, { noi: { value: estimatedNoi.value, confidence: estimatedNoi.confidence, rawText: 'proxy from rent roll' } },
+              { ...docMeta, docClass: 'operating_statement' }, 'deterministic', true /* derived */);
             console.log(`  ✓ Estimated NOI: $${estimatedNoi.value.toLocaleString()}/yr (proxy, confidence: ${estimatedNoi.confidence.toFixed(2)})`);
           }
           break;
@@ -242,6 +264,12 @@ program
           }
           
           const confidence = result.t12.noi?.confidence ?? 0.5;
+          // Record NOI as a CLAIM so the resolver ranks it against other
+          // sources instead of a later, weaker document silently winning.
+          if (result.t12.noi) {
+            recordClaims(deal, { noi: { value: result.t12.noi.value, confidence: result.t12.noi.confidence, rawText: 'T12 operating statement' } },
+              { ...docMeta, docClass: 'operating_statement' }, 'deterministic');
+          }
           auditDataExtracted(deal, source.id, 't12', result.t12.revenue.length + result.t12.expenses.length, confidence);
           
           console.log(`  ✓ Revenue items: ${result.t12.revenue.length}`);
@@ -264,9 +292,10 @@ program
           deal.extracted.notes.push(...extracted.notes);
 
           // Apply extracted values to deal
-          applyExtractedValues(deal, extracted.extractedValues, source.id);
-          applyHotelMetrics(deal, extracted.extractedValues, source.id);
-          
+          recordClaims(deal, extracted.extractedValues, docMeta, 'deterministic');
+          noteInjections(deal, docMeta, fileContent);
+          await maybeLlmAugment(deal, extracted.extractedValues, fileContent, source.id, docMeta);
+
           const avgConfidence = extracted.notes.length > 0 
             ? extracted.notes.reduce((sum, n) => sum + n.confidence, 0) / extracted.notes.length 
             : 0.5;
@@ -291,9 +320,10 @@ program
           deal.extracted.notes.push(...extracted.notes);
 
           // Apply extracted values to deal
-          applyExtractedValues(deal, extracted.extractedValues, source.id);
-          applyHotelMetrics(deal, extracted.extractedValues, source.id);
-          
+          recordClaims(deal, extracted.extractedValues, docMeta, 'deterministic');
+          noteInjections(deal, docMeta, fileContent);
+          await maybeLlmAugment(deal, extracted.extractedValues, fileContent, source.id, docMeta);
+
           const avgConfidence = extracted.notes.length > 0 
             ? extracted.notes.reduce((sum, n) => sum + n.confidence, 0) / extracted.notes.length 
             : 0.5;
@@ -313,9 +343,9 @@ program
 
           if (!deal.extracted.notes) deal.extracted.notes = [];
           deal.extracted.notes.push(...extracted.notes);
-          applyExtractedValues(deal, extracted.extractedValues, source.id);
-          applyHotelMetrics(deal, extracted.extractedValues, source.id);
-          await maybeLlmAugment(deal, extracted.extractedValues, extracted.rawText, source.id);
+          recordClaims(deal, extracted.extractedValues, docMeta, 'deterministic');
+          noteInjections(deal, docMeta, extracted.rawText);
+          await maybeLlmAugment(deal, extracted.extractedValues, extracted.rawText, source.id, docMeta);
 
           // OCR fallback: image-based PDFs have a near-empty text layer.
           // Send the PDF itself to the extraction model (server-side OCR).
@@ -325,7 +355,7 @@ program
             try {
               console.log(`  Text layer thin (${extracted.rawText.length} chars / ${extracted.pageCount} pages) - running OCR pass...`);
               const ocr = await extractWithOcrPdf(filePath, source.id, {});
-              applyLlmOutcome(deal, ocr, source.id, 'OCR_EXTRACTION');
+              applyLlmOutcome(deal, ocr, source.id, 'OCR_EXTRACTION', docMeta);
             } catch (e) {
               console.warn(`  OCR pass failed: ${e instanceof Error ? e.message : e}`);
             }
@@ -352,9 +382,9 @@ program
           const extracted = extractFromText(wbParsed.asText, source.id);
           if (!deal.extracted.notes) deal.extracted.notes = [];
           deal.extracted.notes.push(...extracted.notes);
-          applyExtractedValues(deal, extracted.extractedValues, source.id);
-          applyHotelMetrics(deal, extracted.extractedValues, source.id);
-          await maybeLlmAugment(deal, extracted.extractedValues, wbParsed.asText, source.id);
+          recordClaims(deal, extracted.extractedValues, docMeta, 'deterministic');
+          noteInjections(deal, docMeta, wbParsed.asText);
+          await maybeLlmAugment(deal, extracted.extractedValues, wbParsed.asText, source.id, docMeta);
 
           auditDataExtracted(deal, source.id, 'xlsx_model', extracted.notes.length, 0.6);
           console.log(`  ✓ Extracted ${extracted.notes.length} data points across sheets`);
@@ -371,9 +401,9 @@ program
           const extracted = extractFromText(text, source.id);
           if (!deal.extracted.notes) deal.extracted.notes = [];
           deal.extracted.notes.push(...extracted.notes);
-          applyExtractedValues(deal, extracted.extractedValues, source.id);
-          applyHotelMetrics(deal, extracted.extractedValues, source.id);
-          await maybeLlmAugment(deal, extracted.extractedValues, text, source.id);
+          recordClaims(deal, extracted.extractedValues, docMeta, 'deterministic');
+          noteInjections(deal, docMeta, text);
+          await maybeLlmAugment(deal, extracted.extractedValues, text, source.id, docMeta);
           auditDataExtracted(deal, source.id, 'docx', extracted.notes.length, 0.65);
           console.log(`  ✓ Extracted ${extracted.notes.length} data points (deterministic)`);
           break;
@@ -387,7 +417,7 @@ program
           console.log('  Running OCR/vision extraction on image...');
           try {
             const ocr = await extractWithOcrImage(filePath, source.id, {});
-            applyLlmOutcome(deal, ocr, source.id, 'OCR_EXTRACTION');
+            applyLlmOutcome(deal, ocr, source.id, 'OCR_EXTRACTION', docMeta);
             auditDataExtracted(deal, source.id, 'image', ocr.merged, 0.6);
           } catch (e) {
             console.warn(`  OCR failed: ${e instanceof Error ? e.message : e}`);
@@ -866,6 +896,113 @@ function applyExtractedValues(
 }
 
 /**
+ * Scan supplied document text for prompt-injection attempts and record them as
+ * serious structure flags. A document that tries to instruct the pipeline is a
+ * material fact about the counterparty, not just a security event.
+ */
+function noteInjections(
+  deal: ReturnType<typeof loadDeal>,
+  doc: { sourceId: string; filename: string },
+  text: string
+): void {
+  const found = scanForInjection(text || '');
+  if (!found.length) return;
+  if (!deal.extracted.injections) deal.extracted.injections = [];
+  if (!deal.extracted.notes) deal.extracted.notes = [];
+  for (const f of found) {
+    deal.extracted.injections.push({ sourceId: doc.sourceId, filename: doc.filename, pattern: f.pattern, excerpt: f.excerpt });
+    deal.extracted.notes.push({
+      sourceId: doc.sourceId,
+      field: 'structureFlag',
+      extractedValue: `SERIOUS: Document integrity - ${doc.filename} contains text resembling a ${f.pattern} directed at an automated reader. Treated as data and ignored; escalate to the analyst.`,
+      confidence: 0.9,
+      rawText: `"${f.excerpt.substring(0, 90)}"`,
+    });
+    console.log(`    ! INJECTION ATTEMPT (${f.pattern}) in ${doc.filename}: ignored and flagged`);
+  }
+}
+
+/**
+ * Record extracted values as CLAIMS with document provenance, then re-resolve
+ * the whole ledger. This is what lets an executed amendment beat the original
+ * PSA and an appraisal beat a marketing brochure, regardless of arrival order.
+ */
+function recordClaims(
+  deal: ReturnType<typeof loadDeal>,
+  values: Record<string, { value: number | string; confidence: number; rawText: string }>,
+  doc: { sourceId: string; filename: string; docClass: string; docDate: string | null; amendmentRank: number },
+  extractor: Claim['extractor'],
+  derived = false
+): void {
+  if (!deal.extracted.claims) deal.extracted.claims = [];
+  for (const [field, hit] of Object.entries(values)) {
+    if (hit === undefined || hit === null) continue;
+    deal.extracted.claims.push(makeClaim(field, hit.value, hit.confidence, hit.rawText ?? '', doc, extractor, derived));
+  }
+  const { resolutions, conflicts } = resolveLedger(deal.extracted.claims as Claim[]);
+  deal.extracted.conflicts = conflicts;
+
+  // Apply resolved winners to the deal facts
+  const winners: Record<string, { value: number | string; confidence: number; rawText: string }> = {};
+  for (const [field, r] of Object.entries(resolutions)) {
+    winners[field] = { value: r.winner.value, confidence: r.winner.confidence, rawText: `[${r.winner.docClass}] ${r.winner.quote}` };
+  }
+  applyResolvedFacts(deal, winners, resolutions);
+  if (conflicts.length) {
+    for (const c of conflicts.filter(x => x.severity === 'material')) {
+      console.log(`    ! CONFLICT ${c.message}`);
+    }
+  }
+}
+
+/** Overwrite deal facts from resolved claims (authority wins, not order). */
+function applyResolvedFacts(
+  deal: ReturnType<typeof loadDeal>,
+  winners: Record<string, { value: number | string; confidence: number; rawText: string }>,
+  resolutions: Record<string, { basis: string; winner: { filename: string } }>
+): void {
+  const num = (f: string) => {
+    const w = winners[f];
+    return w && typeof w.value === 'number' ? w : null;
+  };
+  const price = num('askingPrice');
+  if (price) {
+    deal.askingPrice = tracked(price.value as number, price.confidence, {
+      sourceId: resolutions['askingPrice']?.winner.filename,
+      unit: 'USD',
+      rationale: `Resolved: ${resolutions['askingPrice']?.basis}. ${price.rawText.substring(0, 80)}`,
+    });
+  }
+  const noi = num('noi');
+  if (noi) {
+    deal.extracted.t12 = {
+      sourceId: resolutions['noi']?.winner.filename ?? 'resolved',
+      revenue: [], expenses: [],
+      noi: tracked(noi.value as number, noi.confidence, {
+        sourceId: resolutions['noi']?.winner.filename,
+        unit: 'USD/year',
+        rationale: `Resolved: ${resolutions['noi']?.basis}`,
+      }),
+    };
+  }
+  const capex = num('capexTotal');
+  if (capex) {
+    deal.assumptions.capexTotal = tracked(capex.value as number, capex.confidence, {
+      sourceId: resolutions['capexTotal']?.winner.filename, unit: 'USD',
+      rationale: `Resolved: ${resolutions['capexTotal']?.basis}`,
+    });
+  }
+  const cap = num('capRate');
+  if (cap) {
+    deal.assumptions.entryCap = tracked(cap.value as number, Math.max(0.3, cap.confidence - 0.1), {
+      sourceId: resolutions['capRate']?.winner.filename, unit: '%',
+      rationale: `Resolved: ${resolutions['capRate']?.basis}`,
+    });
+  }
+  applyHotelMetrics(deal, winners, resolutions['keys']?.winner.filename ?? 'resolved');
+}
+
+/**
  * LLM augmentation: runs only when deterministic extraction came up short
  * (early-exit lever). Cheapest routed model, JSON-schema output, same sanity
  * ranges. Cost is audit-logged per call.
@@ -874,7 +1011,8 @@ async function maybeLlmAugment(
   deal: ReturnType<typeof loadDeal>,
   extractedValues: Record<string, { value: number | string; confidence: number; rawText: string }>,
   rawText: string,
-  sourceId: string
+  sourceId: string,
+  docMeta?: { sourceId: string; filename: string; docClass: string; docDate: string | null; amendmentRank: number }
 ): Promise<void> {
   if (!llmAvailable()) return;
   // The LLM pass now ALWAYS runs on text documents: numeric gap-fill keeps
@@ -885,7 +1023,7 @@ async function maybeLlmAugment(
   try {
     console.log(`  LLM pass (${found} deterministic fields; gap-fill + structure-flag sweep)...`);
     const out = await extractWithLlm(rawText, sourceId, extractedValues);
-    applyLlmOutcome(deal, out, sourceId, 'LLM_EXTRACTION');
+    applyLlmOutcome(deal, out, sourceId, 'LLM_EXTRACTION', docMeta);
   } catch (e) {
     console.warn(`  LLM pass failed (kept deterministic results): ${e instanceof Error ? e.message : e}`);
   }
@@ -896,12 +1034,17 @@ function applyLlmOutcome(
   deal: ReturnType<typeof loadDeal>,
   out: LlmExtractionOutcome,
   sourceId: string,
-  action: string
+  action: string,
+  docMeta?: { sourceId: string; filename: string; docClass: string; docDate: string | null; amendmentRank: number }
 ): void {
   if (!deal.extracted.notes) deal.extracted.notes = [];
   deal.extracted.notes.push(...out.notes);
-  applyExtractedValues(deal, out.values, sourceId);
-  applyHotelMetrics(deal, out.values, sourceId);
+  if (docMeta) {
+    recordClaims(deal, out.values, docMeta, action === 'OCR_EXTRACTION' ? 'ocr' : 'llm');
+  } else {
+    applyExtractedValues(deal, out.values, sourceId);
+    applyHotelMetrics(deal, out.values, sourceId);
+  }
   // Structure flags land as notes so every surface (back office, narrative,
   // screen) sees the red tape alongside the numbers. Deduped by normalized
   // label: three years of audited financials repeat the same LP covenants.

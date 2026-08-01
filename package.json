@@ -14,7 +14,11 @@
     "rebuild": "npm run clean && npm run build",
     "test": "npm run build && node --test dist/tests/tools.test.js",
     "eval": "npm run build && node eval/run-evals.js",
-    "demo": "node tools/demo-up.js"
+    "demo": "node tools/demo-up.js",
+    "eval:all": "npm run build && node eval/run-all.js",
+    "eval:redteam": "node eval/redteam.js",
+    "eval:judge": "node eval/judge.js",
+    "eval:shadow": "node eval/shadow.js"
   },
   "keywords": [
     "real-estate",

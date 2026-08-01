@@ -145,6 +145,42 @@ export const HotelMetricsSchema = z.object({
 export type HotelMetrics = z.infer<typeof HotelMetricsSchema>;
 
 // ============================================================================
+// Claims ledger: every extracted value with document provenance, so the
+// resolver can rank by authority and date rather than arrival order.
+// ============================================================================
+
+export const ClaimSchema = z.object({
+  field: z.string(),
+  value: z.union([z.number(), z.string()]),
+  confidence: z.number(),
+  quote: z.string(),
+  sourceId: z.string(),
+  filename: z.string(),
+  docClass: z.string(),
+  authority: z.number(),
+  docDate: z.string().nullable(),
+  amendmentRank: z.number(),
+  extractor: z.enum(['deterministic', 'llm', 'ocr', 'manual']),
+  derived: z.boolean().optional(),
+});
+export type ClaimRecord = z.infer<typeof ClaimSchema>;
+
+export const ConflictSchema = z.object({
+  field: z.string(),
+  severity: z.enum(['material', 'minor']),
+  spreadPct: z.number().nullable(),
+  message: z.string(),
+  claims: z.array(z.object({
+    value: z.union([z.number(), z.string()]),
+    filename: z.string(),
+    docClass: z.string(),
+    authority: z.number(),
+    docDate: z.string().nullable(),
+  })),
+});
+export type ConflictRecord = z.infer<typeof ConflictSchema>;
+
+// ============================================================================
 // Extracted Notes (from emails, OMs)
 // ============================================================================
 
@@ -344,6 +380,14 @@ export const DealSchema = z.object({
     t12: T12Schema.optional(),
     hotel: HotelMetricsSchema.optional(),
     notes: z.array(ExtractedNoteSchema),
+    /** Every claim ever made about this deal, with provenance. Append-only. */
+    claims: z.array(ClaimSchema).optional(),
+    /** Field-level disagreements between sources, for human adjudication. */
+    conflicts: z.array(ConflictSchema).optional(),
+    /** Injection attempts found in supplied documents. */
+    injections: z.array(z.object({
+      sourceId: z.string(), filename: z.string(), pattern: z.string(), excerpt: z.string(),
+    })).optional(),
   }),
   assumptions: AssumptionsSchema,
   underwriting: z.object({

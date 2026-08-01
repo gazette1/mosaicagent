@@ -4,3 +4,6 @@ deals/
 *.log
 .DS_Store
 .env
+
+.cache/
+gateway-traces.jsonl

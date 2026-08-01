@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { callJson, LlmUsage, UserContent } from '../llm/client';
 import { ExtractedNote } from '../core/schemas';
-import { passesSanity } from './text-parser';
+import { passesSanity, coerceField } from './text-parser';
 
 const EXTRACTION_FIELDS = [
   'askingPrice', 'noi', 'capRate', 'occupancy', 'adr', 'revpar', 'keys',
@@ -103,7 +103,7 @@ async function runExtraction(
     if (already[field] !== undefined) continue; // deterministic result wins; LLM fills gaps
     if (!passesSanity(field, hit.value)) continue; // same guardrail as regex
     const confidence = Math.max(0.3, Math.min(0.85, hit.confidence)); // capped below primary docs
-    values[field] = { value: hit.value, confidence, rawText: hit.quote };
+    values[field] = { value: coerceField(field, hit.value), confidence, rawText: hit.quote };
     notes.push({
       sourceId,
       field,

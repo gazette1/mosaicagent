@@ -67,7 +67,13 @@ function caseIndustrial() {
   checks.push(['verdict KILL at market rates', screen.verdict === 'KILL']);
   checks.push(['DSCR kill flag triggered', screen.killFlags.some(f => f.triggered && /Margin/.test(f.criterion))]);
   checks.push(['entry cap 6.5-8.5%', approx(screen.keyMetrics?.entryCap?.value?.value, 7.17, 0.2)]);
-  checks.push(['stressed DSCR 0.9-1.1x', (screen.keyMetrics?.stressedDscr?.value?.value ?? 0) >= 0.9 && (screen.keyMetrics?.stressedDscr?.value?.value ?? 9) <= 1.1]);
+  // Golden updated 2026-07-31: the claims ledger made confidence provenance-
+  // aware, so a deal whose NOI comes from a broker email now correctly trips
+  // adaptive stress (wider NOI haircut). DSCR drops ~0.09 as a result. The
+  // verdict and kill flag are unchanged, which is what the check is really for.
+  checks.push(['stressed DSCR 0.85-1.1x under adaptive stress', (screen.keyMetrics?.stressedDscr?.value?.value ?? 0) >= 0.85 && (screen.keyMetrics?.stressedDscr?.value?.value ?? 9) <= 1.1]);
+  checks.push(['T12 beats broker email on NOI (claims ledger)', deal.extracted.t12?.noi?.value === 304600 && (deal.extracted.t12?.noi?.confidence ?? 0) >= 0.8]);
+  checks.push(['claims ledger populated with provenance', (deal.extracted.claims ?? []).length > 0 && (deal.extracted.claims ?? []).every(c => c.docClass && typeof c.authority === 'number')]);
   // Trajectory: the path matters, not just the landing
   const actions = deal.auditLog.map(e => e.action);
   checks.push(['trajectory: sources before screen', actions.indexOf('SOURCE_ADDED') < actions.indexOf('SCREEN_EXECUTED') || !actions.includes('SCREEN_EXECUTED')]);

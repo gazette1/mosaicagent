@@ -229,10 +229,24 @@ const SANITY_RANGES: Record<string, [number, number]> = {
 };
 
 export function passesSanity(field: string, value: number | string): boolean {
-  if (typeof value !== 'number') return true;
   const range = SANITY_RANGES[field];
   if (!range) return true;
+  // A field with a numeric range must receive a number. Found by a shadow run:
+  // the extraction model returned a full address string for `keys`, and the
+  // old string-passthrough let it straight into the deal record.
+  if (typeof value !== 'number') {
+    const coerced = Number(String(value).replace(/[$,\s]/g, ''));
+    if (!isFinite(coerced)) return false;
+    return coerced >= range[0] && coerced <= range[1];
+  }
   return value >= range[0] && value <= range[1];
+}
+
+/** Numeric fields coerce to number, so downstream math never sees prose. */
+export function coerceField(field: string, value: number | string): number | string {
+  if (!SANITY_RANGES[field] || typeof value === 'number') return value;
+  const n = Number(String(value).replace(/[$,\s]/g, ''));
+  return isFinite(n) ? n : value;
 }
 
 export function extractFromText(text: string, sourceId: string): TextExtractionResult {

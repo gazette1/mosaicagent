@@ -194,10 +194,25 @@ export function screenDeal(deal: Deal): ScreenResult {
   // Collect metrics for kill criteria
   // ============================================================================
   
+  // Conflict-aware confidence: if authoritative sources disagree about a field,
+  // the honest confidence in that field is lower than how cleanly any single
+  // document was read. Without this the Red Line Check prints CLEAR on figures
+  // the narrative is openly skeptical about, which an independent judge
+  // correctly scored as miscalibrated.
+  const conflictPenalty = (field: string): number => {
+    const c = (deal.extracted.conflicts ?? []).find(x => x.field === field);
+    if (!c) return 0;
+    return c.severity === 'material' ? 0.35 : 0.15;
+  };
+  const effectiveNoiConfidence = noi ? Math.max(0.05, noi.confidence - conflictPenalty('noi')) : undefined;
+  if (noi && effectiveNoiConfidence !== undefined && effectiveNoiConfidence < noi.confidence) {
+    adaptiveAdjustments.push(`NOI confidence reduced to ${(effectiveNoiConfidence * 100).toFixed(0)}% because sources disagree on NOI`);
+  }
+
   const metrics: Record<string, number | undefined> = {
     stressedDscr,
     largestTenantPct,
-    noiConfidence: noi?.confidence,
+    noiConfidence: effectiveNoiConfidence,
     capexConfidence: deal.assumptions.capexTotal?.confidence ?? 
                      deal.assumptions.capexPerUnit?.confidence,
     entryCap: entryCap?.value,
@@ -230,6 +245,37 @@ export function screenDeal(deal: Deal): ScreenResult {
     }
   }
   
+  // ============================================================================
+  // Source disagreement: materially conflicting claims about the same field
+  // are a credit issue, not a data-cleanliness issue. A deal where the
+  // appraisal and the executed contract disagree on price by 15% is not a
+  // deal you can underwrite until a human says which is right.
+  // ============================================================================
+
+  const materialConflicts = (deal.extracted.conflicts ?? []).filter(c => c.severity === 'material');
+  if (materialConflicts.length > 0) {
+    killFlags.push({
+      criterion: 'Source Disagreement',
+      triggered: true,
+      severity: 'soft',
+      reason: `${materialConflicts.length} field(s) where comparably authoritative sources disagree: ` +
+        materialConflicts.slice(0, 3).map(c => `${c.field} (${c.spreadPct}%)`).join(', '),
+      dataNeededToOverturn: 'Written confirmation of the controlling figure from the sponsor or counsel',
+    });
+  }
+
+  // Document integrity: a supplied document that tries to instruct the reader
+  const injections = deal.extracted.injections ?? [];
+  if (injections.length > 0) {
+    killFlags.push({
+      criterion: 'Document Integrity',
+      triggered: true,
+      severity: 'soft',
+      reason: `${injections.length} document(s) contain text directed at an automated reader (${[...new Set(injections.map(i => i.pattern))].join(', ')}). Content ignored as data; provenance is now a diligence item.`,
+      dataNeededToOverturn: 'Clean copies from the counterparty and an explanation of the inserted text',
+    });
+  }
+
   // ============================================================================
   // Structural complexity flag: serious deal-structure red tape extracted from
   // the documents (GP transfers, agency approvals, evictions, fee overhangs).

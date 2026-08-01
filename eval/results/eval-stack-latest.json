@@ -1,0 +1,85 @@
+{
+  "timestamp": "2026-08-01T01:49:45.860Z",
+  "results": [
+    {
+      "id": 5,
+      "name": "tool unit tests",
+      "kind": "offline",
+      "status": "pass",
+      "detail": "ℹ duration_ms 110.5964",
+      "secs": "3"
+    },
+    {
+      "id": 1,
+      "name": "golden set",
+      "kind": "offline",
+      "status": "fail",
+      "detail": "Regression vs f377931: delta -0.045 REGRESSED",
+      "secs": "15"
+    },
+    {
+      "id": 10,
+      "name": "red team",
+      "kind": "offline",
+      "status": "pass",
+      "detail": "Report: C:\\Real Estate\\mosaic-underwriting\\eval\\results\\redteam-latest.json",
+      "secs": "7"
+    },
+    {
+      "id": 2,
+      "name": "llm as judge",
+      "kind": "offline",
+      "status": "pass",
+      "detail": "Calibration queue: eval/results/human-calibration.jsonl (fill humanReview to grade the judge)",
+      "secs": "28"
+    },
+    {
+      "id": 9,
+      "name": "shadow run",
+      "kind": "offline",
+      "status": "pass",
+      "detail": "Report: eval/results/shadow-latest.json",
+      "secs": "0"
+    },
+    {
+      "id": 3,
+      "name": "rubric scoring",
+      "kind": "offline",
+      "status": "covered",
+      "detail": "inside judge + golden set",
+      "secs": "0"
+    },
+    {
+      "id": 4,
+      "name": "trajectory",
+      "kind": "offline",
+      "status": "covered",
+      "detail": "inside golden set",
+      "secs": "0"
+    },
+    {
+      "id": 6,
+      "name": "regression",
+      "kind": "offline",
+      "status": "covered",
+      "detail": "inside golden set (history diff)",
+      "secs": "0"
+    },
+    {
+      "id": 7,
+      "name": "a/b in prod",
+      "kind": "online",
+      "status": "staged",
+      "detail": "needs live traffic; harness ready in shadow.js",
+      "secs": "0"
+    },
+    {
+      "id": 8,
+      "name": "human review",
+      "kind": "online",
+      "status": "staged",
+      "detail": "queue written by judge.js; awaits a human",
+      "secs": "0"
+    }
+  ]
+}

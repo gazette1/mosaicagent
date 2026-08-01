@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-07-27T23:52:47.814Z",
-  "commit": "f377931",
+  "timestamp": "2026-08-01T01:52:50.775Z",
+  "commit": "a4b86ed",
   "overall": 1,
   "cases": [
     {
@@ -46,7 +46,15 @@
           "ok": true
         },
         {
-          "label": "stressed DSCR 0.9-1.1x",
+          "label": "stressed DSCR 0.85-1.1x under adaptive stress",
+          "ok": true
+        },
+        {
+          "label": "T12 beats broker email on NOI (claims ledger)",
+          "ok": true
+        },
+        {
+          "label": "claims ledger populated with provenance",
           "ok": true
         },
         {
@@ -121,14 +129,14 @@
     }
   ],
   "regression": {
-    "prevCommit": "51e8031",
-    "prevOverall": 1,
-    "delta": 0,
+    "prevCommit": "a4b86ed",
+    "prevOverall": 0.978,
+    "delta": 0.022,
     "regressed": false,
     "perCase": [
       {
         "name": "industrial-samples",
-        "delta": 0
+        "delta": 0.045
       },
       {
         "name": "sandcastle-hotel",

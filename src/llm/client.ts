@@ -16,8 +16,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { assertBudget, recordSpend, trace, cacheKey, cacheGet, cacheSet, outputIsSafe } from './gateway';
 
-interface ProviderCfg { baseUrl: string; keyEnv: string }
+interface ProviderCfg { baseUrl: string; keyEnv: string; style?: 'openai' | 'anthropic' }
 interface ModelsConfig {
   providers: Record<string, ProviderCfg>;
   routing: Record<string, string>;
@@ -63,6 +64,10 @@ function resolveRoute(role: string): { provider: string; model: string; cfg: Pro
   return { provider: maybeProvider, model: maybeModel, cfg };
 }
 
+// Deal context so the gateway can attribute spend and enforce per-deal caps
+let currentDealId: string | undefined;
+export function setDealContext(dealId?: string): void { currentDealId = dealId; }
+
 export function llmAvailable(): boolean {
   loadEnv();
   // Extraction is the load-bearing tier; its provider's key decides availability
@@ -97,7 +102,7 @@ export type UserContent =
 // json_object + schema-in-prompt for the rest of the session.
 // Moonshot (Kimi) starts there: probing showed strict json_schema yields
 // empty content while json_object works reliably.
-const schemaUnsupported = new Set<string>(['moonshot']);
+const schemaUnsupported = new Set<string>(['moonshot', 'deepseek', 'anthropic', 'gemini']);
 
 export async function callJson<T = unknown>(
   role: string,
@@ -121,7 +126,7 @@ export async function callJson<T = unknown>(
       : `${system}\n\nRespond with a single JSON object matching this JSON Schema exactly (no extra keys, no prose):\n${JSON.stringify(schema)}`;
     // Kimi K3 is a reasoning model: hidden reasoning tokens count against the
     // completion budget, so give it headroom. Param name also differs.
-    const isMoonshot = provider === 'moonshot';
+    const isMoonshot = provider !== 'openai'; // non-OpenAI providers need token headroom and max_tokens
     const tokenBudget = (isMoonshot ? Math.max(maxOutputTokens * 2, maxOutputTokens + 1500) : maxOutputTokens) * budgetMultiplier;
     const body: Record<string, unknown> = {
       model,
@@ -134,6 +139,27 @@ export async function callJson<T = unknown>(
         : { type: 'json_object' },
     };
     body[isMoonshot ? 'max_tokens' : 'max_completion_tokens'] = tokenBudget;
+    // Anthropic speaks a different wire format: x-api-key, system as a
+    // top-level field, usage under input_tokens/output_tokens
+    if (cfg.style === 'anthropic') {
+      const ares = await fetch(`${cfg.baseUrl}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model,
+          max_tokens: tokenBudget,
+          system: sys + ' Respond with a single JSON object and nothing else.',
+          messages: [{ role: 'user', content: typeof user === 'string' ? user : JSON.stringify(user) }],
+        }),
+      });
+      const aj = await ares.json() as { error?: { message?: string }; content?: { text?: string }[]; usage?: { input_tokens?: number; output_tokens?: number } };
+      if (aj.error) throw new Error(aj.error.message || 'anthropic error');
+      const txt = (aj.content || []).map(c => c.text || '').join('');
+      const jm = txt.match(/\{[\s\S]*\}/);
+      if (!jm) throw new Error('no JSON object in response');
+      return { data: JSON.parse(jm[0]) as T, usage: { prompt_tokens: aj.usage?.input_tokens, completion_tokens: aj.usage?.output_tokens } };
+    }
+
     const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
@@ -157,6 +183,28 @@ export async function callJson<T = unknown>(
     return { data: JSON.parse(content) as T, usage: json.usage };
   };
 
+  // Cache first (grab-once): identical prompt + model returns the stored result
+  const ck = cacheKey([provider, model, system, user, schemaName, maxOutputTokens]);
+  const hit = cacheGet<LlmJsonResult<T>>(ck);
+  if (hit) {
+    trace({ ts: new Date().toISOString(), role, provider, model, dealId: currentDealId,
+      inputTokens: hit.usage.inputTokens, outputTokens: hit.usage.outputTokens, estCostUsd: 0,
+      latencyMs: 0, cacheHit: true, attempts: 0, outcome: 'ok', promptHash: ck.substring(0, 16) });
+    return { ...hit, usage: { ...hit.usage, estCostUsd: 0 } };
+  }
+
+  // Budget is enforced BEFORE the call, on a conservative estimate
+  const estimate = ((JSON.stringify(user).length / 4) * price.input + maxOutputTokens * price.output) / 1_000_000;
+  try {
+    assertBudget(currentDealId, estimate);
+  } catch (e) {
+    trace({ ts: new Date().toISOString(), role, provider, model, dealId: currentDealId,
+      inputTokens: 0, outputTokens: 0, estCostUsd: 0, latencyMs: 0, cacheHit: false, attempts: 0,
+      outcome: 'refused', error: String((e as Error).message).substring(0, 200), promptHash: ck.substring(0, 16) });
+    throw e;
+  }
+
+  const started = Date.now();
   let lastErr: Error | null = null;
   let attempts = 0;
   for (let i = 1; i <= 2; i++) {
@@ -176,19 +224,33 @@ export async function callJson<T = unknown>(
       }
       const inTok = out.usage?.prompt_tokens ?? 0;
       const outTok = out.usage?.completion_tokens ?? 0;
-      return {
+      const cost = (inTok * price.input + outTok * price.output) / 1_000_000;
+      recordSpend(currentDealId, cost);
+
+      // Output safety: refuse anything that leaked instructions or secrets
+      const safety = outputIsSafe(JSON.stringify(out.data));
+      if (!safety.safe) {
+        trace({ ts: new Date().toISOString(), role, provider, model, dealId: currentDealId,
+          inputTokens: inTok, outputTokens: outTok, estCostUsd: cost, latencyMs: Date.now() - started,
+          cacheHit: false, attempts, outcome: 'refused', error: 'unsafe output: ' + safety.reason, promptHash: ck.substring(0, 16) });
+        throw new Error(`Refused model output: ${safety.reason}`);
+      }
+
+      const result = {
         data: out.data,
-        usage: {
-          model: `${provider}:${model}`,
-          inputTokens: inTok,
-          outputTokens: outTok,
-          estCostUsd: (inTok * price.input + outTok * price.output) / 1_000_000,
-          attempts,
-        },
+        usage: { model: `${provider}:${model}`, inputTokens: inTok, outputTokens: outTok, estCostUsd: cost, attempts },
       };
+      trace({ ts: new Date().toISOString(), role, provider, model, dealId: currentDealId,
+        inputTokens: inTok, outputTokens: outTok, estCostUsd: cost, latencyMs: Date.now() - started,
+        cacheHit: false, attempts, outcome: 'ok', promptHash: ck.substring(0, 16) });
+      cacheSet(ck, result);
+      return result;
     } catch (e) {
       lastErr = e instanceof Error ? e : new Error(String(e));
     }
   }
+  trace({ ts: new Date().toISOString(), role, provider, model, dealId: currentDealId,
+    inputTokens: 0, outputTokens: 0, estCostUsd: 0, latencyMs: Date.now() - started, cacheHit: false,
+    attempts, outcome: 'error', error: String(lastErr?.message).substring(0, 200), promptHash: ck.substring(0, 16) });
   throw new Error(`LLM call failed after retry budget (2) on ${provider}:${model}: ${lastErr?.message}`);
 }

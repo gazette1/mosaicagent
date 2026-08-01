@@ -1,0 +1,164 @@
+{
+  "timestamp": "2026-08-01T01:49:45.851Z",
+  "production": "openai:gpt-5.4-nano",
+  "candidate": "deepseek:deepseek-v4-pro",
+  "agreementRate": 0.625,
+  "report": [
+    {
+      "file": "01 Bridge Financing Memo.md",
+      "agree": 5,
+      "total": 9,
+      "disagreements": [
+        {
+          "field": "capRate",
+          "production": 0.095,
+          "candidate": 0.065,
+          "verdict": "DISAGREE"
+        },
+        {
+          "field": "occupancy",
+          "production": 0.7,
+          "candidate": 0.52,
+          "verdict": "DISAGREE"
+        },
+        {
+          "field": "adr",
+          "production": 160,
+          "candidate": 118,
+          "verdict": "DISAGREE"
+        }
+      ],
+      "rows": [
+        {
+          "field": "askingPrice",
+          "production": 16500000,
+          "candidate": 16500000,
+          "verdict": "agree"
+        },
+        {
+          "field": "loanRequest",
+          "production": 18400000,
+          "candidate": 18400000,
+          "verdict": "agree"
+        },
+        {
+          "field": "totalSF",
+          "production": 0,
+          "verdict": "production-only"
+        },
+        {
+          "field": "noi",
+          "production": 2834000,
+          "candidate": 2843000,
+          "verdict": "agree"
+        },
+        {
+          "field": "capRate",
+          "production": 0.095,
+          "candidate": 0.065,
+          "verdict": "DISAGREE"
+        },
+        {
+          "field": "occupancy",
+          "production": 0.7,
+          "candidate": 0.52,
+          "verdict": "DISAGREE"
+        },
+        {
+          "field": "adr",
+          "production": 160,
+          "candidate": 118,
+          "verdict": "DISAGREE"
+        },
+        {
+          "field": "keys",
+          "production": 150,
+          "candidate": 150,
+          "verdict": "agree"
+        },
+        {
+          "field": "capexTotal",
+          "production": 8500000,
+          "candidate": 8500000,
+          "verdict": "agree"
+        }
+      ],
+      "prod": {
+        "model": "openai:gpt-5.4-nano",
+        "ms": 3,
+        "cost": 0
+      },
+      "cand": {
+        "model": "deepseek:deepseek-v4-pro",
+        "ms": 1,
+        "cost": 0
+      }
+    },
+    {
+      "file": "1193_Fulton_Underwriting_Scenario_A_Earnout.docx",
+      "agree": 5,
+      "total": 7,
+      "disagreements": [
+        {
+          "field": "keys",
+          "production": "1193 Fulton Avenue, Bronx, NY 10456; 25-unit LIHTC affordable housing multifamily",
+          "candidate": 25,
+          "verdict": "DISAGREE"
+        }
+      ],
+      "rows": [
+        {
+          "field": "askingPrice",
+          "production": 650000,
+          "candidate": 650000,
+          "verdict": "agree"
+        },
+        {
+          "field": "noi",
+          "production": 141373,
+          "candidate": 141373,
+          "verdict": "agree"
+        },
+        {
+          "field": "occupancy",
+          "production": 0.823,
+          "candidate": 0.823,
+          "verdict": "agree"
+        },
+        {
+          "field": "keys",
+          "production": "1193 Fulton Avenue, Bronx, NY 10456; 25-unit LIHTC affordable housing multifamily",
+          "candidate": 25,
+          "verdict": "DISAGREE"
+        },
+        {
+          "field": "totalSF",
+          "production": 24542,
+          "candidate": 24542,
+          "verdict": "agree"
+        },
+        {
+          "field": "loanRequest",
+          "production": 2607054,
+          "verdict": "production-only"
+        },
+        {
+          "field": "capexTotal",
+          "production": 245420,
+          "candidate": 245420,
+          "verdict": "agree"
+        }
+      ],
+      "prod": {
+        "model": "openai:gpt-5.4-nano",
+        "ms": 1,
+        "cost": 0
+      },
+      "cand": {
+        "model": "deepseek:deepseek-v4-pro",
+        "ms": 2,
+        "cost": 0
+      }
+    }
+  ]
+}
