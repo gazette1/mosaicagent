@@ -160,17 +160,33 @@ export function fenceUntrusted(label: string, text: string): string {
   ].join('\n');
 }
 
-/** Patterns that look like an injection attempt inside a document. */
+/**
+ * Patterns that look like an injection attempt inside a document.
+ *
+ * Precision matters as much as recall here. A scanner that flags ordinary deal
+ * documents trains the analyst to ignore the flag, which costs more than the
+ * attack it was meant to catch. Three rules learned from real packages:
+ *
+ *  1. Alternation binds looser than concatenation. The original exfiltration
+ *     pattern read /reveal|print|output|repeat (your )?(prompt|rules)/, which
+ *     parses as "reveal" OR "print" OR "output" OR "repeat ...". It fired on
+ *     "Footprint", "Printed Name & Title", and "GPU footprint" in the Caven
+ *     Point package. Every alternation now sits inside a group.
+ *  2. Word boundaries, always. "print" lives inside "footprint" and "blueprint".
+ *  3. Role markers must be anchored to line start. Unanchored, "System:" fires
+ *     on "Cooling System:" and "Power System:", which appear on every data
+ *     centre and mechanical spec sheet in existence.
+ */
 const INJECTION_PATTERNS: [RegExp, string][] = [
-  [/ignore (all |any |your )?(previous|prior|above|preceding) (instructions|rules|prompts)/i, 'instruction override'],
-  [/disregard (the |your )?(system|previous|above)/i, 'instruction override'],
-  [/you are now|from now on,? you/i, 'role reassignment'],
-  [/\b(system|assistant)\s*:\s*/i, 'fake role marker'],
-  [/reveal|print|output|repeat (your |the )?(system )?(prompt|instructions|rules)/i, 'prompt exfiltration'],
-  [/api[_ -]?key|secret[_ -]?key|password|credential/i, 'credential probe'],
-  [/report (the )?(dscr|noi|value|verdict) as/i, 'output coercion'],
-  [/do not (flag|report|mention)/i, 'suppression attempt'],
-  [/mark (this|the) (deal|loan) as (approved|pursue|pass)/i, 'verdict coercion'],
+  [/\bignore\s+(?:all\s+|any\s+|your\s+)?(?:previous|prior|above|preceding)\s+(?:instructions|rules|prompts)\b/i, 'instruction override'],
+  [/\bdisregard\s+(?:the\s+|your\s+|all\s+)?(?:previous\s+|above\s+|system\s+|prior\s+)?(?:instructions|rules|prompts|directives)\b/i, 'instruction override'],
+  [/\byou\s+are\s+now\s+(?:a|an|the)\b|\bfrom\s+now\s+on,?\s+you\s+(?:will|must|should|are)\b/i, 'role reassignment'],
+  [/^[ \t]*(?:system|assistant|user)\s*:/im, 'fake role marker'],
+  [/\b(?:reveal|print|output|repeat|show|display)\s+(?:me\s+)?(?:your\s+|the\s+)?(?:system\s+)?(?:prompt|instructions|rules)\b/i, 'prompt exfiltration'],
+  [/\b(?:api[_ -]?key|secret[_ -]?key|access[_ -]?token|bearer\s+token)\b|\b(?:reveal|show|print|send|list)\s+(?:the\s+|your\s+)?(?:credentials|passwords?|api\s+keys?)\b/i, 'credential probe'],
+  [/\breport\s+(?:the\s+)?(?:dscr|noi|value|verdict|risk)\s+as\b/i, 'output coercion'],
+  [/\bdo\s+not\s+(?:flag|report|mention|disclose|surface)\b/i, 'suppression attempt'],
+  [/\bmark\s+(?:this|the)\s+(?:deal|loan)\s+as\s+(?:approved|pursue|pass)\b/i, 'verdict coercion'],
 ];
 
 export interface InjectionFinding { pattern: string; excerpt: string }

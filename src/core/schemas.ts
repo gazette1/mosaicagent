@@ -12,7 +12,7 @@ import { z } from 'zod';
 export const AssetTypeSchema = z.enum(['industrial', 'retail', 'multifamily', 'hotel', 'lihtc', 'other']);
 export type AssetType = z.infer<typeof AssetTypeSchema>;
 
-export const SourceKindSchema = z.enum(['email', 'om_text', 'rentroll_csv', 't12_csv', 'pdf', 'xlsx_model', 'image', 'docx', 'manual', 'computed']);
+export const SourceKindSchema = z.enum(['email', 'om_text', 'rentroll_csv', 't12_csv', 'pdf', 'xlsx_model', 'image', 'docx', 'doc', 'pptx', 'manual', 'computed']);
 export type SourceKind = z.infer<typeof SourceKindSchema>;
 
 export const VerdictSchema = z.enum(['KILL', 'CHASE', 'STRUCTURE', 'DELEGATE']);

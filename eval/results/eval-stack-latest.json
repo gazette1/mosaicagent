@@ -1,12 +1,12 @@
 {
-  "timestamp": "2026-08-01T02:05:41.460Z",
+  "timestamp": "2026-08-01T21:37:00.919Z",
   "results": [
     {
       "id": 5,
       "name": "tool unit tests",
       "kind": "offline",
       "status": "pass",
-      "detail": "ℹ duration_ms 107.1262",
+      "detail": "ℹ duration_ms 121.092",
       "secs": "3"
     },
     {
@@ -23,7 +23,7 @@
       "kind": "offline",
       "status": "pass",
       "detail": "Report: C:\\Real Estate\\mosaic-underwriting\\eval\\results\\redteam-latest.json",
-      "secs": "6"
+      "secs": "7"
     },
     {
       "id": 2,
@@ -31,7 +31,7 @@
       "kind": "offline",
       "status": "pass",
       "detail": "Calibration queue: eval/results/human-calibration.jsonl (fill humanReview to grade the judge)",
-      "secs": "10"
+      "secs": "0"
     },
     {
       "id": 9,

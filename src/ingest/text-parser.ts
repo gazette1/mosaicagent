@@ -231,6 +231,47 @@ const SANITY_RANGES: Record<string, [number, number]> = {
   capexTotal: [10_000, 2_000_000_000],
 };
 
+/**
+ * String fields need a type check every bit as much as numeric ones.
+ *
+ * The numeric guard came from a shadow run that caught an address landing in
+ * a numeric field. The Caven Point package produced the mirror image: the
+ * seller ENTITY, "21 Caven Point Avenue LLC", won the property `address`
+ * field over the actual property at 21 Caven Point Road, because it sits in a
+ * higher-authority, more recent document and the pattern's greedy tail
+ * swallowed the rest of the line.
+ *
+ * Authority decides which document to believe. It cannot tell you that the
+ * string you pulled out of it is the kind of thing the field wants.
+ */
+const ENTITY_SUFFIX = /\b(?:LLC|L\.L\.C\.|Inc|Corp|Corporation|LP|L\.P\.|LLP|Ltd|Trust|Holdings|Partners)\b/i;
+const DOC_TITLE_WORDS = /\b(?:amendment|term\s*sheet|agreement|exhibit|schedule|addendum|forecast|witnesseth|memorandum|signature)\b/i;
+// Word boundaries are load-bearing here: without them "st" matches inside
+// "Westgate" and every string on earth starts looking like a street address.
+const STREET_TYPE = /\b(?:street|st|avenue|ave|boulevard|blvd|road|rd|drive|dr|lane|ln|way|court|ct|place|pl|highway|hwy|parkway|pkwy|circle|cir|terrace|ter)\b\.?/i;
+
+const STRING_FIELD_RULES: Record<string, (v: string, ctx: string) => boolean> = {
+  address: (v, ctx) => {
+    const t = v.trim();
+    if (t.length < 6 || t.length > 120 || /[\r\n]/.test(t)) return false;
+    if (DOC_TITLE_WORDS.test(t) || ENTITY_SUFFIX.test(t)) return false;
+    // An entity name reads exactly like an address right up until its suffix
+    // arrives, so look just past the match as well.
+    const at = ctx.indexOf(t);
+    if (at >= 0 && ENTITY_SUFFIX.test(ctx.substring(at + t.length, at + t.length + 14))) return false;
+    return /^\d+[A-Za-z]?\s+\S/.test(t) && STREET_TYPE.test(t);
+  },
+  cityState: (v) => /^[A-Za-z][A-Za-z .'-]{2,40}(?:,\s*[A-Z]{2})?$/.test(v.trim()),
+};
+
+/** True when a string field's value is plausibly that field's type. */
+export function passesStringSanity(field: string, value: number | string, ctx = ''): boolean {
+  const rule = STRING_FIELD_RULES[field];
+  if (!rule) return true;
+  if (typeof value !== 'string') return false;
+  return rule(value, ctx || value);
+}
+
 export function passesSanity(field: string, value: number | string): boolean {
   const range = SANITY_RANGES[field];
   if (!range) return true;
@@ -263,7 +304,7 @@ export function extractFromText(text: string, sourceId: string): TextExtractionR
         const rawText = match[0];
         const value = parseValue(match[1], pattern.valueType, match[0]);
 
-        if (value !== null && passesSanity(pattern.field, value)) {
+        if (value !== null && passesSanity(pattern.field, value) && passesStringSanity(pattern.field, value, rawText)) {
           // Only add if we don't already have this field or if this match is better
           if (!extractedValues[pattern.field] || 
               pattern.confidence > extractedValues[pattern.field].confidence) {

@@ -38,6 +38,7 @@ export const AUTHORITY: Record<string, number> = {
   bank_statement: 85,    // bank statements: primary evidence of cash movement
   appraisal: 80,         // third-party licensed appraisal
   operating_statement: 70, // borrower-prepared T12 / rent roll
+  personal_financial_statement: 60, // signed sponsor/guarantor PFS: self-prepared, but attested
   sponsor_model: 55,     // sponsor's own underwriting spreadsheet (advocacy)
   term_sheet: 50,        // lender term sheets: real but indicative
   broker_memo: 40,       // financing memo, OM, teaser (advocacy)
@@ -76,6 +77,12 @@ export function classifyDocument(filename: string, sample = ''): { docClass: Doc
   if (hit(/rent ?roll|t-?12|trailing twelve|operating statement|income statement|financial statement|aged receivab|profit and loss|\bp&l\b/, f)) {
     return { docClass: 'operating_statement', why: 'borrower operating statement' };
   }
+  // A PFS describes a PERSON, not the property. Classifying it as a sponsor
+  // model let Christopher Lam's home address and his apartment number ("Unit
+  // 104") compete for the deal's `address` and `totalUnits` fields.
+  if (hit(/\bpfs|personal financial statement/, f) || hit(/personal financial statement/, s)) {
+    return { docClass: 'personal_financial_statement', why: 'sponsor/guarantor personal financial statement' };
+  }
   if (hit(/underwriting|model|proforma|pro ?forma|budget|scorecard|debt schedule/, f) && hit(/\.xlsx?$|\.csv$/, f)) {
     return { docClass: 'sponsor_model', why: 'sponsor-prepared model' };
   }
@@ -87,6 +94,13 @@ export function classifyDocument(filename: string, sample = ''): { docClass: Doc
   }
   if (hit(/brochure|teaser|flyer|listing|marketing|crexi|loopnet/, f)) {
     return { docClass: 'marketing', why: 'marketing collateral' };
+  }
+  // Investment-committee decks are advocacy documents. They carry the
+  // sponsor's headline numbers and belong in the ledger, but they lose to any
+  // executed instrument. Keyed on the extension, so the deck cannot argue
+  // itself into a higher tier.
+  if (hit(/\.pptx?$/, f)) {
+    return { docClass: 'marketing', why: 'investment deck (sponsor advocacy)' };
   }
   if (hit(/transcript|otter|\.vtt$|recording|call/, f) || hit(/speaker \d|transcribed by/, s)) {
     return { docClass: 'transcript', why: 'call transcript' };
@@ -165,6 +179,12 @@ export interface Claim {
    * Found by the golden set: a rent-roll NOI proxy was beating a stated T12.
    */
   derived?: boolean;
+  /**
+   * Which legal instrument inside the file this claim came from. A single PDF
+   * routinely carries a base term sheet AND its amendments; the claim belongs
+   * to one of them, not to the file.
+   */
+  segment?: string;
 }
 
 export interface Resolution {
@@ -269,17 +289,35 @@ export function resolveLedger(claims: Claim[]): { resolutions: Record<string, Re
 }
 
 /** Build a claim from an extraction hit plus its document provenance. */
+/**
+ * Strip personal identifiers from evidence before it is stored.
+ *
+ * Every claim keeps a verbatim quote, which is what makes the ledger auditable
+ * and what the workbook's Provenance sheet prints. Deal rooms contain personal
+ * financial statements: the Caven Point package shipped a live SSN, a date of
+ * birth, and a home address in a sponsor PFS. Provenance must not become a
+ * mechanism for copying that into every downstream artefact.
+ */
+export function redactPii(text: string): string {
+  return String(text ?? '')
+    .replace(/\b\d{3}-\d{2}-\d{4}\b/g, '[SSN REDACTED]')
+    .replace(/\b\d{2}-\d{7}\b/g, '[EIN REDACTED]')
+    .replace(/\b(?:\d[ -]?){13,16}\b/g, '[CARD REDACTED]')
+    .replace(/\b(?:account|acct)\.?\s*(?:no\.?|number|#)?\s*:?\s*\d{6,}\b/gi, 'account [REDACTED]');
+}
+
 export function makeClaim(
   field: string,
   value: number | string,
   confidence: number,
   quote: string,
-  doc: { sourceId: string; filename: string; docClass: DocClass; docDate: string | null; amendmentRank: number },
+  doc: { sourceId: string; filename: string; docClass: DocClass; docDate: string | null; amendmentRank: number; segment?: string },
   extractor: Claim['extractor'],
   derived = false
 ): Claim {
   return {
-    field, value, confidence, quote,
+    field, value, confidence,
+    quote: redactPii(quote),
     sourceId: doc.sourceId,
     filename: doc.filename,
     docClass: doc.docClass,
@@ -288,5 +326,6 @@ export function makeClaim(
     amendmentRank: doc.amendmentRank,
     extractor,
     derived,
+    segment: doc.segment,
   };
 }

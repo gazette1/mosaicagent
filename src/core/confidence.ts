@@ -165,6 +165,8 @@ export function adjustConfidenceBySource(baseConfidence: number, sourceKind: Sou
     'om_text': -0.15,
     'pdf': -0.15, // Marketing/appraisal PDFs: same trust tier as OM text
     'docx': -0.15, // Memos and packages: OM tier
+    'doc': -0.15, // Legacy Word: same tier as docx, the format says nothing about trust
+    'pptx': -0.20, // Decks: advocacy, and slide text loses its labels easily
     'image': -0.20, // OCR/vision reads: slightly below native text
     'email': -0.25,
     'manual': -0.10,

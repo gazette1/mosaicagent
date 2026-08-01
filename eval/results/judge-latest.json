@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-08-01T02:05:41.281Z",
+  "timestamp": "2026-08-01T21:37:00.724Z",
   "dealDir": "C:\\Real Estate\\mosaic-underwriting\\deals\\oceanfront-hotel-bridge-ms9q21m9\\outputs",
   "judgments": [
     {
@@ -22,7 +22,7 @@
       "one_fix": "Reconcile the Red Line Check's CLEAR ratings (e.g., 'Unclear/Unverifiable Income: CLEAR') with the executive summary's explicit 27% NOI dispute so the confidence signals don't contradict each other.",
       "usage": {
         "model": "anthropic:claude-sonnet-5",
-        "cost": 0.020496
+        "cost": 0
       }
     }
   ],

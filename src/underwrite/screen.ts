@@ -438,6 +438,37 @@ export function screenDeal(deal: Deal): ScreenResult {
   }
 
   // ============================================================================
+  // Absence of evidence is not evidence of absence
+  //
+  // "No NOI data available" is a statement about THIS PIPELINE, not about the
+  // deal. Caven Point arrived with a 54-sheet sponsor model containing four
+  // years of audited-format P&L and five years of forecast, and still tripped
+  // the unverifiable-income hard kill because none of it parsed into the NOI
+  // field. Returning KILL there is a false negative that costs a broker a live
+  // deal, and it is the same failure the owner-occupancy override patched one
+  // narrow case of.
+  //
+  // The general rule: a hard kill must rest on an adverse FACT. When the only
+  // hard kill is missing data and confidence is low, the honest output is "I
+  // could not read enough to screen this", which is DELEGATE plus a shopping
+  // list. Adverse facts that were actually observed still kill.
+  // ============================================================================
+
+  const dataAvailabilityKill = hardKills.length === 1 &&
+    hardKills[0].criterion === 'Unclear/Unverifiable Income' &&
+    /no .*data available|not available|missing|unavailable/i.test(hardKills[0].reason ?? '');
+
+  if (verdict === 'KILL' && dataAvailabilityKill && confidence.overall < 0.45) {
+    verdict = 'DELEGATE';
+    riskScore = Math.max(riskScore, 4);
+    riskScoreRationale =
+      `Insufficient extracted data to screen: overall confidence ${(confidence.overall * 100).toFixed(0)}%. ` +
+      'The income basis was not readable from the documents supplied, which is a data gap rather than an ' +
+      'adverse finding, so this is not scored as a kill. Obtain trailing operating statements and a current ' +
+      'rent/licence roll, then re-screen. ' + riskScoreRationale;
+  }
+
+  // ============================================================================
   // Build output
   // ============================================================================
 

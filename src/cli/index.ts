@@ -29,6 +29,9 @@ import { normalizeT12, estimateNoiFromRentRoll } from '../ingest/t12-normalizer'
 import { parseBrokerEmail, parseOMText, extractFromText } from '../ingest/text-parser';
 import { extractFromPdf } from '../ingest/pdf-extractor';
 import { extractDocxText } from '../ingest/docx-extractor';
+import { extractDocText } from '../ingest/doc-extractor';
+import { extractPptxText } from '../ingest/pptx-extractor';
+import { splitInstruments, locateInstrument, Instrument } from '../core/segments';
 import { ASSET_TYPE_CRITERIA } from '../core/doctrine';
 import { llmAvailable, setDealContext } from '../llm/client';
 import { classifyDocument, extractDocDate, amendmentRank, makeClaim, resolveLedger, AUTHORITY, Claim } from '../core/claims';
@@ -128,9 +131,9 @@ program
   .description('Ingest a source file into a deal')
   .requiredOption('-d, --deal <dealId>', 'Deal ID')
   .requiredOption('-f, --file <path>', 'Path to source file')
-  .requiredOption('-k, --kind <kind>', 'Source type (email, om_text, rentroll_csv, t12_csv, pdf, xlsx_model, image, docx)')
+  .requiredOption('-k, --kind <kind>', 'Source type (email, om_text, rentroll_csv, t12_csv, pdf, xlsx_model, image, docx, doc, pptx)')
   .action(async (options: { deal: string; file: string; kind: string }) => {
-    const validKinds: Source['kind'][] = ['email', 'om_text', 'rentroll_csv', 't12_csv', 'pdf', 'xlsx_model', 'image', 'docx', 'manual'];
+    const validKinds: Source['kind'][] = ['email', 'om_text', 'rentroll_csv', 't12_csv', 'pdf', 'xlsx_model', 'image', 'docx', 'doc', 'pptx', 'manual'];
     
     if (!validKinds.includes(options.kind as Source['kind'])) {
       console.error(`Error: Invalid kind "${options.kind}". Must be one of: ${validKinds.join(', ')}`);
@@ -284,6 +287,7 @@ program
           console.log('  Parsing broker email...');
           const fileContent = fs.readFileSync(filePath, 'utf-8');
           const extracted = parseBrokerEmail(fileContent, source.id);
+          attachInstruments(docMeta, fileContent);
 
           // Initialize notes array if needed
           if (!deal.extracted.notes) {
@@ -312,6 +316,7 @@ program
           console.log('  Parsing offering memorandum...');
           const fileContent = fs.readFileSync(filePath, 'utf-8');
           const extracted = parseOMText(fileContent, source.id);
+          attachInstruments(docMeta, fileContent);
 
           // Initialize notes array if needed
           if (!deal.extracted.notes) {
@@ -340,6 +345,7 @@ program
           console.log('  Extracting PDF text...');
           const extracted = await extractFromPdf(filePath, source.id);
           console.log(`  ✓ ${extracted.pageCount} pages`);
+          attachInstruments(docMeta, extracted.rawText);
 
           if (!deal.extracted.notes) deal.extracted.notes = [];
           deal.extracted.notes.push(...extracted.notes);
@@ -380,6 +386,7 @@ program
 
           // Pattern extraction across the full workbook text
           const extracted = extractFromText(wbParsed.asText, source.id);
+          attachInstruments(docMeta, wbParsed.asText);
           if (!deal.extracted.notes) deal.extracted.notes = [];
           deal.extracted.notes.push(...extracted.notes);
           recordClaims(deal, extracted.extractedValues, docMeta, 'deterministic');
@@ -398,6 +405,7 @@ program
           console.log('  Extracting DOCX text...');
           const text = await extractDocxText(filePath);
           console.log(`  ✓ ${text.length} chars`);
+          attachInstruments(docMeta, text);
           const extracted = extractFromText(text, source.id);
           if (!deal.extracted.notes) deal.extracted.notes = [];
           deal.extracted.notes.push(...extracted.notes);
@@ -405,6 +413,41 @@ program
           noteInjections(deal, docMeta, text);
           await maybeLlmAugment(deal, extracted.extractedValues, text, source.id, docMeta);
           auditDataExtracted(deal, source.id, 'docx', extracted.notes.length, 0.65);
+          console.log(`  ✓ Extracted ${extracted.notes.length} data points (deterministic)`);
+          break;
+        }
+
+        case 'doc': {
+          // Legacy Word binary. Real deal rooms still route executed
+          // instruments this way; on Caven Point the controlling Second
+          // Amendment arrived as a .doc.
+          console.log('  Extracting legacy .doc text...');
+          const text = extractDocText(filePath);
+          console.log(`  ✓ ${text.length} chars`);
+          attachInstruments(docMeta, text);
+          const extracted = extractFromText(text, source.id);
+          if (!deal.extracted.notes) deal.extracted.notes = [];
+          deal.extracted.notes.push(...extracted.notes);
+          recordClaims(deal, extracted.extractedValues, docMeta, 'deterministic');
+          noteInjections(deal, docMeta, text);
+          await maybeLlmAugment(deal, extracted.extractedValues, text, source.id, docMeta);
+          auditDataExtracted(deal, source.id, 'doc', extracted.notes.length, 0.65);
+          console.log(`  ✓ Extracted ${extracted.notes.length} data points (deterministic)`);
+          break;
+        }
+
+        case 'pptx': {
+          console.log('  Extracting deck text...');
+          const text = await extractPptxText(filePath);
+          console.log(`  ✓ ${text.length} chars, ${(text.match(/--- Slide/g) || []).length} slides`);
+          attachInstruments(docMeta, text);
+          const extracted = extractFromText(text, source.id);
+          if (!deal.extracted.notes) deal.extracted.notes = [];
+          deal.extracted.notes.push(...extracted.notes);
+          recordClaims(deal, extracted.extractedValues, docMeta, 'deterministic');
+          noteInjections(deal, docMeta, text);
+          await maybeLlmAugment(deal, extracted.extractedValues, text, source.id, docMeta);
+          auditDataExtracted(deal, source.id, 'pptx', extracted.notes.length, 0.6);
           console.log(`  ✓ Extracted ${extracted.notes.length} data points (deterministic)`);
           break;
         }
@@ -927,17 +970,86 @@ function noteInjections(
  * the whole ledger. This is what lets an executed amendment beat the original
  * PSA and an appraisal beat a marketing brochure, regardless of arrival order.
  */
+/**
+ * Fields that describe the PROPERTY. A document about a person must not fill
+ * any of them, no matter how confidently its numbers read.
+ */
+const PROPERTY_FIELDS = new Set([
+  'address', 'cityState', 'totalSF', 'totalUnits', 'askingPrice', 'loanRequest',
+  'noi', 'capRate', 'occupancy', 'adr', 'revpar', 'keys', 'capexTotal',
+  'grossRent', 'opex', 'pricePerSF', 'pricePerUnit', 'exitCapRate', 'landAcres',
+]);
+
+interface DocMeta {
+  sourceId: string;
+  filename: string;
+  docClass: string;
+  docDate: string | null;
+  amendmentRank: number;
+  /** Legal instruments found inside this file, in document order. */
+  segments?: Instrument[];
+  /** The extracted text, needed to locate a claim's quote within a segment. */
+  text?: string;
+  segment?: string;
+}
+
+/**
+ * Segment a document once its text is available, and report what was found.
+ * Called from each ingest branch because text arrives at a different point for
+ * every format.
+ */
+function attachInstruments(doc: DocMeta, text: string): DocMeta {
+  doc.text = text;
+  doc.segments = splitInstruments(text, doc.filename);
+  if (doc.segments.length > 1) {
+    console.log(`  Instruments in this file: ${doc.segments.length}`);
+    for (const s of doc.segments) {
+      const rank = s.amendmentRank ? ` amd#${s.amendmentRank}` : '';
+      console.log(`    - ${s.label.substring(0, 62)}${s.docDate ? ' (' + s.docDate + ')' : ''}${rank}`);
+    }
+  } else if (doc.segments.length === 1 && doc.segments[0].label !== 'whole document') {
+    // Single instrument, but its own title beats whatever the filename says.
+    const only = doc.segments[0];
+    if (only.amendmentRank !== doc.amendmentRank || (only.docDate && only.docDate !== doc.docDate)) {
+      console.log(`  Instrument title overrides filename: "${only.label.substring(0, 50)}"${only.docDate ? ' dated ' + only.docDate : ''}${only.amendmentRank ? ' amd#' + only.amendmentRank : ''}`);
+      doc.amendmentRank = only.amendmentRank;
+      if (only.docDate) doc.docDate = only.docDate;
+    }
+  }
+  return doc;
+}
+
 function recordClaims(
   deal: ReturnType<typeof loadDeal>,
   values: Record<string, { value: number | string; confidence: number; rawText: string }>,
-  doc: { sourceId: string; filename: string; docClass: string; docDate: string | null; amendmentRank: number },
+  doc: DocMeta,
   extractor: Claim['extractor'],
   derived = false
 ): void {
   if (!deal.extracted.claims) deal.extracted.claims = [];
   for (const [field, hit] of Object.entries(values)) {
     if (hit === undefined || hit === null) continue;
-    deal.extracted.claims.push(makeClaim(field, hit.value, hit.confidence, hit.rawText ?? '', doc, extractor, derived));
+    // A personal financial statement describes a PERSON. Mining it for property
+    // fields put a sponsor's home address into the deal's `address` and his
+    // apartment number ("Unit 104") into `totalUnits`. It is also the one
+    // document class in a deal room that reliably carries SSNs and account
+    // numbers, so the less of it that reaches the property record the better.
+    if (doc.docClass === 'personal_financial_statement' && PROPERTY_FIELDS.has(field)) {
+      continue;
+    }
+    // One file can hold several legal instruments. Date and rank the claim by
+    // the instrument its quote actually sits in, not by the file it arrived in,
+    // so the April term sheet inside a PDF named for a May amendment does not
+    // inherit the amendment's recency. Authority is deliberately NOT adjusted
+    // here: a document must never talk its way up a tier.
+    let scoped = doc;
+    if (doc.segments && doc.segments.length > 1 && doc.text) {
+      const inst = locateInstrument(hit.rawText ?? '', doc.text, doc.segments);
+      if (inst) {
+        scoped = { ...doc, amendmentRank: inst.amendmentRank, docDate: inst.docDate ?? doc.docDate, segment: inst.label };
+      }
+    }
+    deal.extracted.claims.push(makeClaim(field, hit.value, hit.confidence, hit.rawText ?? '', scoped, extractor, derived));
   }
   const { resolutions, conflicts } = resolveLedger(deal.extracted.claims as Claim[]);
   deal.extracted.conflicts = conflicts;
