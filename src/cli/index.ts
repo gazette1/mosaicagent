@@ -293,7 +293,7 @@ program
           if (!deal.extracted.notes) {
             deal.extracted.notes = [];
           }
-          deal.extracted.notes.push(...extracted.notes);
+          pushNotes(deal, extracted.notes, docMeta);
 
           // Apply extracted values to deal
           recordClaims(deal, extracted.extractedValues, docMeta, 'deterministic');
@@ -322,7 +322,7 @@ program
           if (!deal.extracted.notes) {
             deal.extracted.notes = [];
           }
-          deal.extracted.notes.push(...extracted.notes);
+          pushNotes(deal, extracted.notes, docMeta);
 
           // Apply extracted values to deal
           recordClaims(deal, extracted.extractedValues, docMeta, 'deterministic');
@@ -348,7 +348,7 @@ program
           attachInstruments(docMeta, extracted.rawText);
 
           if (!deal.extracted.notes) deal.extracted.notes = [];
-          deal.extracted.notes.push(...extracted.notes);
+          pushNotes(deal, extracted.notes, docMeta);
           recordClaims(deal, extracted.extractedValues, docMeta, 'deterministic');
           noteInjections(deal, docMeta, extracted.rawText);
           await maybeLlmAugment(deal, extracted.extractedValues, extracted.rawText, source.id, docMeta);
@@ -388,7 +388,7 @@ program
           const extracted = extractFromText(wbParsed.asText, source.id);
           attachInstruments(docMeta, wbParsed.asText);
           if (!deal.extracted.notes) deal.extracted.notes = [];
-          deal.extracted.notes.push(...extracted.notes);
+          pushNotes(deal, extracted.notes, docMeta);
           recordClaims(deal, extracted.extractedValues, docMeta, 'deterministic');
           noteInjections(deal, docMeta, wbParsed.asText);
           await maybeLlmAugment(deal, extracted.extractedValues, wbParsed.asText, source.id, docMeta);
@@ -408,7 +408,7 @@ program
           attachInstruments(docMeta, text);
           const extracted = extractFromText(text, source.id);
           if (!deal.extracted.notes) deal.extracted.notes = [];
-          deal.extracted.notes.push(...extracted.notes);
+          pushNotes(deal, extracted.notes, docMeta);
           recordClaims(deal, extracted.extractedValues, docMeta, 'deterministic');
           noteInjections(deal, docMeta, text);
           await maybeLlmAugment(deal, extracted.extractedValues, text, source.id, docMeta);
@@ -427,7 +427,7 @@ program
           attachInstruments(docMeta, text);
           const extracted = extractFromText(text, source.id);
           if (!deal.extracted.notes) deal.extracted.notes = [];
-          deal.extracted.notes.push(...extracted.notes);
+          pushNotes(deal, extracted.notes, docMeta);
           recordClaims(deal, extracted.extractedValues, docMeta, 'deterministic');
           noteInjections(deal, docMeta, text);
           await maybeLlmAugment(deal, extracted.extractedValues, text, source.id, docMeta);
@@ -443,7 +443,7 @@ program
           attachInstruments(docMeta, text);
           const extracted = extractFromText(text, source.id);
           if (!deal.extracted.notes) deal.extracted.notes = [];
-          deal.extracted.notes.push(...extracted.notes);
+          pushNotes(deal, extracted.notes, docMeta);
           recordClaims(deal, extracted.extractedValues, docMeta, 'deterministic');
           noteInjections(deal, docMeta, text);
           await maybeLlmAugment(deal, extracted.extractedValues, text, source.id, docMeta);
@@ -979,6 +979,20 @@ const PROPERTY_FIELDS = new Set([
   'noi', 'capRate', 'occupancy', 'adr', 'revpar', 'keys', 'capexTotal',
   'grossRent', 'opex', 'pricePerSF', 'pricePerUnit', 'exitCapRate', 'landAcres',
 ]);
+
+/**
+ * Notes feed the memo directly, so the property-field guard has to apply here
+ * too. Blocking only the CLAIM let a sponsor's home city survive as a note and
+ * the memo duly reported "one source lists the city as Los Angeles" as a
+ * collateral-file inconsistency on a Jersey City asset.
+ */
+function pushNotes(deal: ReturnType<typeof loadDeal>, notes: ExtractedNote[], doc: DocMeta): void {
+  if (!deal.extracted.notes) deal.extracted.notes = [];
+  const keep = doc.docClass === 'personal_financial_statement'
+    ? notes.filter(n => !PROPERTY_FIELDS.has(n.field))
+    : notes;
+  deal.extracted.notes.push(...keep);
+}
 
 interface DocMeta {
   sourceId: string;
